@@ -49,7 +49,7 @@ export function startWebSocketServer(port: number) {
       ws.isAlive = true;
     });
 
-    console.log("New WebSocket client connected");
+    console.log(`[CONNECTED] New client connected`);
 
     ws.on("message", (rawData) => {
       try {
@@ -73,7 +73,7 @@ export function startWebSocketServer(port: number) {
 
     ws.on("close", () => {
       frontendClients.delete(ws);
-      console.log("WebSocket client disconnected");
+      console.log(`[DISCONNECTED] ${ws.clientType} client disconnected`);
     });
 
     ws.on("error", () => {
@@ -99,7 +99,7 @@ export function shutdownWebSocketServer(): Promise<void> {
 function handleFrontendRegister(ws: ExtendedWebSocket) {
   ws.clientType = "frontend";
   frontendClients.add(ws);
-
+  console.log(`[FRONTEND] Frontend client registered`);
   const latestMetrics = db
     .prepare(`
       SELECT
@@ -125,6 +125,8 @@ function handleFrontendRegister(ws: ExtendedWebSocket) {
 
 function handleAgentMetrics(ws: ExtendedWebSocket, message: AgentMetricsMessage) {
   const { hostname, ipAddress, cpuUsage, ramUsage, diskUsage } = message.payload;
+
+  ws.clientType = "agent";
 
   if (!hostname || typeof hostname !== "string") {
     sendError(ws, "Invalid field: hostname is required");
@@ -172,14 +174,16 @@ function handleAgentMetrics(ws: ExtendedWebSocket, message: AgentMetricsMessage)
   sendJson(ws, { type: "metrics_ack", status });
 
   broadcastToFrontends({
+
     type: "metrics_update",
     payload: { hostname, ipAddress: ipAddress ?? null, cpuUsage, ramUsage, diskUsage, status, timestamp: now },
   });
 
-  console.log(`Metrics received from ${hostname} — status: ${status}`);
+  console.log(`[AGENT] Metrics received from ${hostname} — status: ${status}`);
 }
 
 function broadcastToFrontends(data: object) {
+  console.log(`[BROADCAST] Sent update to ${frontendClients.size} frontend clients`);
   for (const client of frontendClients) {
     if (client.readyState === WebSocket.OPEN) {
       sendJson(client, data);
@@ -188,7 +192,9 @@ function broadcastToFrontends(data: object) {
 }
 
 function sendJson(ws: WebSocket, data: object) {
-  ws.send(JSON.stringify(data));
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(data));
+  }
 }
 
 function sendError(ws: WebSocket, message: string) {

@@ -16,6 +16,7 @@
     "dev:seed": "tsx src/server.ts --seed",
     "build": "tsc",
     "start": "node dist/server.js",
-    "start:seed": "node dist/server.js --seed"
+    "start:seed": "node dist/server.js --seed",
+    "test": "node --import tsx --test src/**/*.test.ts"
   }
 }
