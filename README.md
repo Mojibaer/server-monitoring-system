@@ -33,7 +33,6 @@ Additional functions:
 - Live system updates
 - Historical data storage
 - Simple web interface
-- Authenticated access (basic concept)
 
 ---
 
@@ -42,7 +41,7 @@ Additional functions:
 ### Agent
 **Python**
 
-Used to collect system metrics on Linux systems.  
+Used to collect system metrics on Linux and Windows systems.
 Python is lightweight, widely supported, and ideal for scripting tasks.
 
 ### Backend
@@ -65,17 +64,6 @@ Simple dashboard interface for displaying server status and live values.
 #### WebSocket
 
 Used for real-time communication between backend and frontend clients.
-
-#### REST API
-
-Used for:
-
-- requesting historical data
-- authentication
-- configuration requests
-- standard backend access
-
----
 
 ## Data Flow
 
