@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server Monitoring System</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Server Monitoring Dashboard</h1>
+
+        <div class="charts-container">
+            <div class="chart-box">
+                <canvas id="cpuChart"></canvas>
+            </div>
+            <div class="chart-box">
+                <canvas id="ramChart"></canvas>
+            </div>
+        </div>
+
+        <div class="status-container">
+            <div id="diskUsage">Disk Usage: Loading...</div>
+            
+            <h3>Running Processes</h3>
+            <table id="processTable">
+                <thead>
+                    <tr>
+                        <th>Process Name</th>
+                        <th>Memory Usage</th>
+                    </tr>
+                </thead>
+                <tbody>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
