@@ -1,9 +1,13 @@
-// ۱. ابتدا تعریف سوکت
+
 const socket = new WebSocket('ws://localhost:8081');
 
-// ۲. تنظیم رویدادهای سوکت
+
 socket.onopen = () => {
-    console.log("Connected to WebSocket Server! ");
+    console.log("Connected to WebSocket Server!");
+
+    socket.send(JSON.stringify({
+        type: "frontend_register"
+    }));
 };
 
 socket.onerror = (error) => {
@@ -44,18 +48,35 @@ const ramChart = new Chart(ramCtx, {
 socket.onmessage = (event) => {
     const data = JSON.parse(event.data);
     console.log("Data received:", data);
-    
-    if (data.cpuUsage !== undefined) {
+
+    if (data.type === "initial_metrics") {
+    console.log("Initial metrics:", data.payload);
+
+    if (data.payload.length > 0) {
+        const m = data.payload[0]; 
+
         const time = new Date().toLocaleTimeString();
 
-        updateChart(cpuChart, time, data.cpuUsage);
-        updateChart(ramChart, time, data.ramUsage);
-        
-        document.getElementById('diskUsage').innerText = `Disk Usage: ${data.diskUsage}%`;
-        
-        if (data.processes) {
-            updateProcessTable(data.processes);
-        }
+        updateChart(cpuChart, time, m.cpuUsage);
+        updateChart(ramChart, time, m.ramUsage);
+
+        document.getElementById('diskUsage').innerText =
+            `Disk Usage: ${m.diskUsage}%`;
+    }
+
+    return;
+}
+
+    if (data.type === "metrics_update") {
+        const m = data.payload;
+
+        const time = new Date().toLocaleTimeString();
+
+        updateChart(cpuChart, time, m.cpuUsage);
+        updateChart(ramChart, time, m.ramUsage);
+
+        document.getElementById('diskUsage').innerText =
+            `Disk Usage: ${m.diskUsage}%`;
     }
 };
 
