@@ -11,9 +11,28 @@ body {
     margin: 0 auto;
 }
 
-h1, h3 {
+h1 {
     text-align: center;
     color: #8681e3;
+}
+
+
+.server-selection {
+    background-color: #2a2f3d;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    text-align: center;
+    border: 1px solid #8681e3;
+}
+
+.server-selection select {
+    padding: 8px;
+    border-radius: 4px;
+    background: #c5ddf4;
+    border: none;
+    font-size: 1rem;
+    cursor: pointer;
 }
 
 .charts-container {
@@ -32,37 +51,17 @@ h1, h3 {
     min-width: 300px;
 }
 
+
 .status-container {
     background-color: #c5ddf4;
     padding: 20px;
     border-radius: 8px;
+    margin-top: 10px;
 }
 
 #diskUsage {
     font-size: 1.2rem;
     font-weight: bold;
-    margin-bottom: 20px;
     text-align: center;
     color: #f5880c;
-}
-
-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 10px;
-}
-
-th, td {
-    padding: 12px;
-    text-align: left;
-    border-bottom: 1px solid #444;
-}
-
-th {
-    background-color: #383fb9;
-    color: white;
-}
-
-tr:hover {
-    background-color: #3d3d3d;
 }
