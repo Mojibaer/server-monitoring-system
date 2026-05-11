@@ -11,6 +11,14 @@
     <div class="container">
         <h1>Server Monitoring Dashboard</h1>
 
+        <div class="server-selection">
+            <label for="serverSelect">Choose Server:</label>
+            <select id="serverSelect">
+                <option value="">Select a server...</option>
+            </select>
+            <span id="serverIp" style="margin-left: 15px; color: #888;"></span>
+        </div>
+
         <div class="charts-container">
             <div class="chart-box">
                 <canvas id="cpuChart"></canvas>
@@ -21,19 +29,9 @@
         </div>
 
         <div class="status-container">
-            <div id="diskUsage">Disk Usage: Loading...</div>
-            
-            <h3>Running Processes</h3>
-            <table id="processTable">
-                <thead>
-                    <tr>
-                        <th>Process Name</th>
-                        <th>Memory Usage</th>
-                    </tr>
-                </thead>
-                <tbody>
-                </tbody>
-            </table>
+            <div id="diskUsage" style="text-align: center; margin-top: 20px; font-size: 1.2rem; font-weight: bold; color: #ff9800;">
+                Disk Usage: Selecting...
+            </div>
         </div>
     </div>
 
