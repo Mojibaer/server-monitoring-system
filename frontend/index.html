@@ -1,12 +1,13 @@
 <!DOCTYPE html>
 <html lang="en" dir="ltr">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Server Monitoring System</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
     <div class="container">
         <h1>Server Monitoring Dashboard</h1>
@@ -29,12 +30,21 @@
         </div>
 
         <div class="status-container">
-            <div id="diskUsage" style="text-align: center; margin-top: 20px; font-size: 1.2rem; font-weight: bold; color: #ff9800;">
+            <div id="diskUsage"
+                style="text-align: center; margin-top: 20px; font-size: 1.2rem; font-weight: bold; color: #ff9800;">
                 Disk Usage: Selecting...
             </div>
+            <div id="serverStatus" class="status ok">
+                STATUS: OK
+            </div>
         </div>
+
+
+
+
     </div>
 
     <script src="script.js"></script>
 </body>
+
 </html>
