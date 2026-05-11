@@ -28,7 +28,7 @@ function startWebSocketServer(port) {
         ws.on("pong", () => {
             ws.isAlive = true;
         });
-        console.log("New WebSocket client connected");
+        console.log(`[CONNECTED] New client connected`);
         ws.on("message", (rawData) => {
             try {
                 const message = JSON.parse(rawData.toString());
@@ -48,7 +48,7 @@ function startWebSocketServer(port) {
         });
         ws.on("close", () => {
             frontendClients.delete(ws);
-            console.log("WebSocket client disconnected");
+            console.log(`[DISCONNECTED] ${ws.clientType} client disconnected`);
         });
         ws.on("error", () => {
             frontendClients.delete(ws);
@@ -69,29 +69,48 @@ function shutdownWebSocketServer() {
 function handleFrontendRegister(ws) {
     ws.clientType = "frontend";
     frontendClients.add(ws);
-    const latestMetrics = db_1.db
-        .prepare(`
+    console.log(`[FRONTEND] Frontend client registered`);
+    const metrics = db_1.db.prepare(`
+    SELECT
+      hostname,
+      ipAddress,
+      cpuUsage,
+      ramUsage,
+      diskUsage,
+      timestamp
+    FROM (
       SELECT
         servers.hostname,
         servers.ip_address AS ipAddress,
         metrics.cpu_usage AS cpuUsage,
         metrics.ram_usage AS ramUsage,
         metrics.disk_usage AS diskUsage,
-        metrics.created_at AS timestamp
+        metrics.created_at AS timestamp,
+        ROW_NUMBER() OVER (
+          PARTITION BY servers.id
+          ORDER BY metrics.created_at DESC
+        ) AS rowNumber
       FROM metrics
-      JOIN servers ON metrics.server_id = servers.id
-      WHERE metrics.id IN (
-        SELECT MAX(id)
-        FROM metrics
-        GROUP BY server_id
-      )
-      ORDER BY metrics.created_at DESC
-    `)
-        .all();
-    sendJson(ws, { type: "initial_metrics", payload: latestMetrics });
+      JOIN servers
+        ON metrics.server_id = servers.id
+    )
+    WHERE rowNumber <= 20
+    ORDER BY hostname ASC, timestamp ASC
+`).all();
+    const metricsWithStatus = metrics.map((m) => ({
+        ...m,
+        status: (0, metrics_1.calculateStatus)({
+            hostname: m.hostname, cpuUsage: m.cpuUsage, ramUsage: m.ramUsage, diskUsage: m.diskUsage
+        })
+    }));
+    sendJson(ws, {
+        type: "initial_metrics",
+        payload: metricsWithStatus
+    });
 }
 function handleAgentMetrics(ws, message) {
     const { hostname, ipAddress, cpuUsage, ramUsage, diskUsage } = message.payload;
+    ws.clientType = "agent";
     if (!hostname || typeof hostname !== "string") {
         sendError(ws, "Invalid field: hostname is required");
         return;
@@ -133,9 +152,10 @@ function handleAgentMetrics(ws, message) {
         type: "metrics_update",
         payload: { hostname, ipAddress: ipAddress ?? null, cpuUsage, ramUsage, diskUsage, status, timestamp: now },
     });
-    console.log(`Metrics received from ${hostname} — status: ${status}`);
+    console.log(`[AGENT] Metrics received from ${hostname} — status: ${status}`);
 }
 function broadcastToFrontends(data) {
+    console.log(`[BROADCAST] Sent update to ${frontendClients.size} frontend clients`);
     for (const client of frontendClients) {
         if (client.readyState === ws_1.WebSocket.OPEN) {
             sendJson(client, data);
@@ -143,7 +163,9 @@ function broadcastToFrontends(data) {
     }
 }
 function sendJson(ws, data) {
-    ws.send(JSON.stringify(data));
+    if (ws.readyState === ws_1.WebSocket.OPEN) {
+        ws.send(JSON.stringify(data));
+    }
 }
 function sendError(ws, message) {
     sendJson(ws, { type: "error", message });

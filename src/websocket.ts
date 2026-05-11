@@ -100,27 +100,47 @@ function handleFrontendRegister(ws: ExtendedWebSocket) {
   ws.clientType = "frontend";
   frontendClients.add(ws);
   console.log(`[FRONTEND] Frontend client registered`);
-  const latestMetrics = db
-    .prepare(`
+  const metrics = db.prepare(`
+    SELECT
+      hostname,
+      ipAddress,
+      cpuUsage,
+      ramUsage,
+      diskUsage,
+      timestamp
+    FROM (
       SELECT
         servers.hostname,
         servers.ip_address AS ipAddress,
         metrics.cpu_usage AS cpuUsage,
         metrics.ram_usage AS ramUsage,
         metrics.disk_usage AS diskUsage,
-        metrics.created_at AS timestamp
+        metrics.created_at AS timestamp,
+        ROW_NUMBER() OVER (
+          PARTITION BY servers.id
+          ORDER BY metrics.created_at DESC
+        ) AS rowNumber
       FROM metrics
-      JOIN servers ON metrics.server_id = servers.id
-      WHERE metrics.id IN (
-        SELECT MAX(id)
-        FROM metrics
-        GROUP BY server_id
-      )
-      ORDER BY metrics.created_at DESC
-    `)
-    .all();
+      JOIN servers
+        ON metrics.server_id = servers.id
+    )
+    WHERE rowNumber <= 20
+    ORDER BY hostname ASC, timestamp ASC
+`).all();
 
-  sendJson(ws, { type: "initial_metrics", payload: latestMetrics });
+  const metricsWithStatus = metrics.map((m: any) => ({
+    ...m,
+    status: calculateStatus({
+      hostname: m.hostname, cpuUsage: m.cpuUsage, ramUsage: m.ramUsage, diskUsage: m.diskUsage
+    })
+  }));
+
+  sendJson(ws, {
+    type: "initial_metrics",
+    payload: metricsWithStatus
+  });
+
+
 }
 
 function handleAgentMetrics(ws: ExtendedWebSocket, message: AgentMetricsMessage) {
