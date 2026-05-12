@@ -28,7 +28,7 @@ def collect_metrics():
         "payload": {
             "hostname": socket.gethostname(),
             "ipAddress": get_ip_address(),
-            "cpuUsage": psutil.cpu_percent(interval=None),
+            "cpuUsage": psutil.cpu_percent(interval=1),
             "ramUsage": psutil.virtual_memory().percent,
             "diskUsage": get_disk_usage(),
         },
@@ -57,7 +57,7 @@ async def run_agent():
 
                     await asyncio.sleep(INTERVAL_SECONDS)
 
-        except (ConnectionRefusedError, OSError, websockets.exceptions.ConnectionClosedError) as e:
+        except (ConnectionRefusedError, OSError, websockets.exceptions.ConnectionClosed, asyncio.TimeoutError) as e:
             print(f"[!] Connection lost: {e}")
             print(f"[*] Reconnecting in {RETRY_DELAY}s...")
             await asyncio.sleep(RETRY_DELAY)

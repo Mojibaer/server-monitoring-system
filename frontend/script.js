@@ -23,6 +23,24 @@ const colors = [
 
 const maxVisiblePoints = 20;
 const metricsStorageKey = 'server-monitoring-metrics-v1';
+const selectedServerStorageKey = 'server-monitoring-selected-v1';
+
+function saveSelectedServer() {
+    if (!window.localStorage) return;
+    try {
+        window.localStorage.setItem(selectedServerStorageKey, serverSelect.value);
+    } catch {}
+}
+
+function restoreSelectedServer() {
+    if (!window.localStorage) return;
+    try {
+        const saved = window.localStorage.getItem(selectedServerStorageKey);
+        const exists = saved &&
+            [...serverSelect.options].some(o => o.value === saved);
+        if (exists) serverSelect.value = saved;
+    } catch {}
+}
 
 function serverKey(hostname) {
 
@@ -297,7 +315,7 @@ class LineChart {
         const valueText =
             `${this.label}: ${this.hoverPoint.value.toFixed(1)}%`;
         const timeText =
-            `Time: ${this.hoverPoint.label}`;
+            `Date and Time: ${this.hoverPoint.label}`;
         const tooltipWidth =
             Math.max(
                 this.ctx.measureText(valueText).width,
@@ -396,10 +414,18 @@ function addServerOption(hostname) {
     serverSelect.appendChild(option);
 }
 
-function formatTime(timestamp) {
+function formatTime(timestamp, includeDate = false) {
+    const date = new Date(timestamp);
 
-    return new Date(timestamp)
-        .toLocaleTimeString();
+    if (includeDate) {
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return `${day}.${month}.${year} ${time}`;
+    }
+
+    return date.toLocaleTimeString();
 }
 
 function calculateStatus(metric) {
@@ -528,6 +554,8 @@ function restoreMetrics() {
     const firstServer =
         Object.keys(serverMetrics)[0];
 
+    restoreSelectedServer();
+
     if (!serverSelect.value && firstServer) {
         serverSelect.value = firstServer;
     }
@@ -555,10 +583,15 @@ function updateCharts(metrics) {
     const cpuValues = [];
     const ramValues = [];
 
+    const spansMultipleDays =
+        recentMetrics.length > 1 &&
+        new Date(recentMetrics[0].timestamp).toDateString() !==
+        new Date(recentMetrics[recentMetrics.length - 1].timestamp).toDateString();
+
     recentMetrics.forEach(metric => {
 
         const time =
-            formatTime(metric.timestamp);
+            formatTime(metric.timestamp, spansMultipleDays);
 
         labels.push(time);
         cpuValues.push(Number(metric.cpuUsage));
@@ -581,7 +614,7 @@ function updateInfo(metric) {
 
     document.getElementById('serverIp')
         .innerText =
-        `IP: ${metric.ipAddress}`;
+        `IP: ${metric.ipAddress ?? 'Unknown'}`;
 
     const status =
         document.getElementById('serverStatus');
@@ -622,6 +655,8 @@ socket.onmessage = (event) => {
         const firstServer =
             Object.keys(serverMetrics)[0];
 
+        restoreSelectedServer();
+
         if (
             !serverSelect.value &&
             firstServer
@@ -647,7 +682,8 @@ socket.onmessage = (event) => {
         saveMetrics();
 
         if (!serverSelect.value) {
-            serverSelect.value = metric.hostname;
+            serverSelect.value = key;
+            saveSelectedServer();
         }
 
         if (serverSelect.value === key) {
@@ -668,6 +704,7 @@ serverSelect.addEventListener('change', () => {
 
     if (!metrics) return;
 
+    saveSelectedServer();
     renderSelectedServer();
 });
 

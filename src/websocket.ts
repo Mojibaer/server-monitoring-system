@@ -21,6 +21,15 @@ interface RegisterFrontendMessage {
 
 type ClientMessage = AgentMetricsMessage | RegisterFrontendMessage;
 
+interface MetricRow {
+  hostname: string;
+  ipAddress: string | null;
+  cpuUsage: number;
+  ramUsage: number;
+  diskUsage: number;
+  timestamp: string;
+}
+
 const frontendClients = new Set<ExtendedWebSocket>();
 let wss: WebSocketServer;
 let pingInterval: ReturnType<typeof setInterval>;
@@ -128,7 +137,7 @@ function handleFrontendRegister(ws: ExtendedWebSocket) {
     ORDER BY hostname ASC, timestamp ASC
 `).all();
 
-  const metricsWithStatus = metrics.map((m: any) => ({
+  const metricsWithStatus = (metrics as MetricRow[]).map((m) => ({
     ...m,
     status: calculateStatus({
       hostname: m.hostname, cpuUsage: m.cpuUsage, ramUsage: m.ramUsage, diskUsage: m.diskUsage

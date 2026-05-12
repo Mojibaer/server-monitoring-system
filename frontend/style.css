@@ -86,6 +86,12 @@ h1 {
     font-weight: bold;
     text-align: center;
     color: #f5880c;
+    margin-bottom: 4px;
+}
+
+#serverIp {
+    margin-left: 15px;
+    color: #888;
 }
 
 .status {
