@@ -1,2 +1,4 @@
 node_modules
 ClientAgent/venv
+__pycache__/
+*.pyc
