@@ -24,6 +24,13 @@ const colors = [
 const maxVisiblePoints = 20;
 const metricsStorageKey = 'server-monitoring-metrics-v1';
 const selectedServerStorageKey = 'server-monitoring-selected-v1';
+const STALE_THRESHOLD_MS = 60 * 60 * 1000;
+
+function isServerStale(metrics) {
+    if (!metrics || !metrics.length) return false;
+    const lastTs = new Date(metrics[metrics.length - 1].timestamp).getTime();
+    return Date.now() - lastTs > STALE_THRESHOLD_MS;
+}
 
 function saveSelectedServer() {
     if (!window.localStorage) return;
@@ -59,6 +66,8 @@ class LineChart {
         this.points = [];
         this.hoverPoint = null;
         this.pendingFrame = false;
+        this.stale = false;
+        this.lastTimestamp = null;
         this.size = {
             width: 0,
             height: 0
@@ -81,6 +90,12 @@ class LineChart {
     setData(labels, values) {
         this.labels = labels;
         this.values = values;
+        this.scheduleDraw();
+    }
+
+    setStale(stale, lastTimestamp = null) {
+        this.stale = stale;
+        this.lastTimestamp = lastTimestamp;
         this.scheduleDraw();
     }
 
@@ -223,7 +238,9 @@ class LineChart {
         this.ctx.fillStyle = '#172033';
         this.ctx.font = 'bold 16px sans-serif';
         this.ctx.fillText(
-            `${this.label}: ${lastValue.toFixed(1)}%`,
+            this.stale
+                ? `${this.label}: last sent ${formatTime(this.lastTimestamp, true)}, nothing since`
+                : `${this.label}: ${lastValue.toFixed(1)}%`,
             padding.left,
             24
         );
@@ -570,8 +587,13 @@ function renderSelectedServer() {
 
     if (!metrics || !metrics.length) return;
 
+    const stale = isServerStale(metrics);
+    const lastTimestamp = metrics[metrics.length - 1].timestamp;
+
+    cpuChart.setStale(stale, lastTimestamp);
+    ramChart.setStale(stale, lastTimestamp);
     updateCharts(metrics);
-    updateInfo(metrics[metrics.length - 1]);
+    updateInfo(metrics[metrics.length - 1], stale);
 }
 
 function updateCharts(metrics) {
@@ -602,15 +624,16 @@ function updateCharts(metrics) {
     ramChart.setData(labels, ramValues);
 }
 
-function updateInfo(metric) {
+function updateInfo(metric, stale = false) {
     if (!metric) return;
 
     const statusValue =
-        metric.status || calculateStatus(metric);
+        stale ? 'UNKNOWN' : (metric.status || calculateStatus(metric));
 
     document.getElementById('diskUsage')
-        .innerText =
-        `Disk Usage: ${metric.diskUsage}%`;
+        .innerText = stale
+            ? `Disk Usage: last sent ${formatTime(metric.timestamp, true)}, nothing since`
+            : `Disk Usage: ${metric.diskUsage}%`;
 
     document.getElementById('serverIp')
         .innerText =
@@ -619,8 +642,9 @@ function updateInfo(metric) {
     const status =
         document.getElementById('serverStatus');
 
-    status.innerText =
-        `STATUS: ${statusValue}`;
+    status.innerText = stale
+        ? `STATUS: UNKNOWN — last data: ${formatTime(metric.timestamp, true)}`
+        : `STATUS: ${statusValue}`;
 
     status.className =
         `status ${statusValue.toLowerCase()}`;
@@ -707,5 +731,7 @@ serverSelect.addEventListener('change', () => {
     saveSelectedServer();
     renderSelectedServer();
 });
+
+setInterval(renderSelectedServer, 60_000);
 
 restoreMetrics();
