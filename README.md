@@ -1,88 +1,110 @@
-# Lightweight Server Monitoring System
+# Server Monitoring System
 
-## Overview
+A simple real-time server monitoring project. It collects basic system metrics from a computer and displays them in a browser dashboard.
 
-A lightweight server monitoring system with agent-based data collection like Nagios but in 
-a smaller scope fit for the objective of this class. A Linux-based Python agent collects 
-system metrics such as CPU usage, memory consumption, and running processes, disk 
-usage and sends them to a central backend service. The backend provides Web/REST APIs 
-for data access, real-time updates via WebSockets, and authenticated access to server 
-status information. 
+## What It Does
 
----
-
-## Team Responsibilities
-
-- Vodopianova Alena – WebSocket communication
-- Arjmand Helma – Frontend page
-- Masir Ahmad – Backend development and database
-- Derman Rifat – Python monitoring script and documentation
-
----
-
-## Features
-
-The system focuses on a minimal demo setup and collects the following metrics:
+The system monitors:
 
 - CPU usage
 - RAM usage
-- Disk space usage
+- Disk usage
+- Hostname and IP address
+- Server status: `OK`, `WARNING`, `CRITICAL`, or `UNKNOWN`
 
-Additional functions:
+A Python agent collects the metrics and sends them to a Node.js backend through WebSocket. The backend stores the data in SQLite and forwards live updates to the frontend dashboard.
 
-- Live system updates
-- Historical data storage
-- Simple web interface
+## Architecture
 
----
+```text
+Python Agent  →  WebSocket Backend  →  SQLite Database
+                        ↓
+                Browser Dashboard
+```
 
-## Technology Stack
+## Technologies
 
-### Agent
-**Python**
+- **Backend:** Node.js, TypeScript, WebSocket (`ws`)
+- **Database:** SQLite
+- **Agent:** Python, psutil, websockets
+- **Frontend:** HTML, CSS, JavaScript
 
-Used to collect system metrics on Linux and Windows systems.
-Python is lightweight, widely supported, and ideal for scripting tasks.
+## Project Structure
 
-### Backend
-**Node.js + Express / Fastify**
+```text
+ClientAgent/     Python monitoring agent
+src/             TypeScript backend source code
+frontend/        Browser dashboard
+data/            SQLite database
+README.md        Project overview
+DOCUMENTATION.md Detailed project documentation
+```
 
-Handles incoming monitoring data, API requests, authentication, and communication with clients.
+## How to Run
 
-### Database
-**SQLite**
+### 1. Start the backend
 
-A lightweight file-based database used for storing monitoring history.
+From the main project folder:
 
-### Frontend
-**HTML + Vanilla JavaScript**
+```bash
+npm install
+npm run dev
+```
 
-Simple dashboard interface for displaying server status and live values.
+For demo data, you can use:
 
-### Communication Technologies
+```bash
+npm run dev:seed
+```
 
-#### WebSocket
+### 2. Open the dashboard
 
-Used for real-time communication between backend and frontend clients.
+Open this file in your browser:
 
-## Data Flow
+```text
+frontend/index.html
+```
 
-1. The Python agent collects system metrics every minute.
-2. The collected data is sent to the backend.
-3. The backend processes and stores the data in SQLite.
-4. Connected frontend clients receive live updates through WebSocket.
-5. Historical data can be requested through REST API endpoints.
+You can also use the VS Code Live Server extension.
 
----
+### 3. Start the Python agent
 
-## Design Goals
+Open a second terminal:
 
-The system was designed with the following goals:
+```bash
+cd ClientAgent
+python -m venv venv
+```
 
-- minimal complexity
-- easy deployment
-- low resource usage
-- clear architecture
-- suitable for classroom demonstration
+On Windows PowerShell:
 
----
+```powershell
+.\venv\Scripts\Activate.ps1
+```
+
+If script execution is blocked, run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\venv\Scripts\Activate.ps1
+```
+
+Then install the dependencies and start the agent:
+
+```bash
+pip install -r requirements.txt
+python agent.py
+```
+
+## Status Rules
+
+The backend evaluates the server status based on the latest metric values:
+
+- `OK`: normal usage
+- `WARNING`: high usage
+- `CRITICAL`: very high usage
+- `UNKNOWN`: no recent data available in the dashboard
+
+## Notes
+
+This project is a small monitoring prototype. It currently uses WebSocket communication and does not include user authentication or a REST API.
