@@ -3,50 +3,14 @@ import socket
 import os
 import psutil
 import grpc
-from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
+
+import monitoring_pb2
+import monitoring_pb2_grpc
 
 BACKEND_URL = "localhost:50051"
 INTERVAL_SECONDS = 60
 RETRY_DELAY = 5
 
-
-def _field(message, name, number, field_type):
-    item = message.field.add()
-    item.name = name
-    item.number = number
-    item.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
-    item.type = field_type
-
-
-def build_messages():
-    file_descriptor = descriptor_pb2.FileDescriptorProto()
-    file_descriptor.name = "monitoring.proto"
-    file_descriptor.package = "monitoring"
-    file_descriptor.syntax = "proto3"
-
-    agent_metrics = file_descriptor.message_type.add()
-    agent_metrics.name = "AgentMetrics"
-    _field(agent_metrics, "hostname", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    _field(agent_metrics, "ip_address", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    _field(agent_metrics, "cpu_usage", 3, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
-    _field(agent_metrics, "ram_usage", 4, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
-    _field(agent_metrics, "disk_usage", 5, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
-
-    metrics_ack = file_descriptor.message_type.add()
-    metrics_ack.name = "MetricsAck"
-    _field(metrics_ack, "status", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    _field(metrics_ack, "message", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-
-    pool = descriptor_pool.DescriptorPool()
-    pool.Add(file_descriptor)
-
-    return (
-        message_factory.GetMessageClass(pool.FindMessageTypeByName("monitoring.AgentMetrics")),
-        message_factory.GetMessageClass(pool.FindMessageTypeByName("monitoring.MetricsAck")),
-    )
-
-
-AgentMetrics, MetricsAck = build_messages()
 
 def get_ip_address():
     try:
@@ -66,7 +30,7 @@ def get_disk_usage():
 
 
 def collect_metrics():
-    return AgentMetrics(
+    return monitoring_pb2.AgentMetrics(
         hostname=socket.gethostname(),
         ip_address=get_ip_address() or "",
         cpu_usage=psutil.cpu_percent(interval=1),
@@ -76,15 +40,11 @@ def collect_metrics():
 
 
 async def connect():
-    """Open the channel and return it together with the ready submit function."""
+    """Open the channel and return it together with the generated service stub."""
     channel = grpc.aio.insecure_channel(BACKEND_URL)
-    submit_metrics = channel.unary_unary(
-        "/monitoring.MonitoringService/SubmitMetrics",
-        request_serializer=AgentMetrics.SerializeToString,
-        response_deserializer=MetricsAck.FromString,
-    )
+    stub = monitoring_pb2_grpc.MonitoringServiceStub(channel)
     await channel.channel_ready()
-    return channel, submit_metrics
+    return channel, stub
 
 
 def log_metrics(data, response):
@@ -99,11 +59,11 @@ def log_metrics(data, response):
     print(f"[<] Server: {response.message} ({response.status})")
 
 
-async def send_loop(submit_metrics):
+async def send_loop(stub):
     """Send metrics on a fixed interval for as long as the connection holds."""
     while True:
         data = collect_metrics()
-        response = await submit_metrics(data, timeout=10)
+        response = await stub.SubmitMetrics(data, timeout=10)
         log_metrics(data, response)
         await asyncio.sleep(INTERVAL_SECONDS)
 
@@ -113,11 +73,11 @@ async def run_agent():
     while True:
         try:
             print(f"[*] Connecting to {BACKEND_URL}...")
-            channel, submit_metrics = await connect()
+            channel, stub = await connect()
             print("[+] Connected")
 
             async with channel:
-                await send_loop(submit_metrics)
+                await send_loop(stub)
 
         except (ConnectionRefusedError, OSError, grpc.RpcError, asyncio.TimeoutError) as e:
             print(f"[!] Connection lost: {e}")
