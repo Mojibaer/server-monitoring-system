@@ -1,0 +1,137 @@
+body {
+    font-family: sans-serif;
+    background: #eef2f7;
+    color: #172033;
+    margin: 0;
+    padding: 28px;
+}
+
+.container {
+    max-width: 1180px;
+    margin: 0 auto;
+}
+
+h1 {
+    text-align: center;
+    color: #25314a;
+    font-size: 2.4rem;
+    margin: 8px 0 28px;
+}
+
+
+.server-selection {
+    align-items: center;
+    background: #ffffff;
+    border: 1px solid #d8dee9;
+    border-radius: 8px;
+    box-shadow: 0 12px 28px rgba(23, 32, 51, 0.08);
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    margin-bottom: 24px;
+    padding: 18px;
+}
+
+.server-selection label {
+    color: #25314a;
+    font-weight: 700;
+}
+
+.server-selection select {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    color: #172033;
+    font-size: 1rem;
+    min-width: 220px;
+    padding: 10px 12px;
+    cursor: pointer;
+}
+
+.charts-container {
+    display: grid;
+    gap: 20px;
+    grid-template-columns: repeat(2, minmax(300px, 1fr));
+    margin-bottom: 22px;
+}
+
+.chart-box {
+    background: #ffffff;
+    border: 1px solid #d8dee9;
+    border-radius: 8px;
+    box-shadow: 0 12px 28px rgba(23, 32, 51, 0.08);
+    box-sizing: border-box;
+    min-height: 320px;
+    padding: 18px;
+}
+
+.chart-box canvas {
+    display: block;
+    height: 280px;
+    width: 100%;
+}
+
+
+.status-container {
+    background: #ffffff;
+    border: 1px solid #d8dee9;
+    border-radius: 8px;
+    box-shadow: 0 12px 28px rgba(23, 32, 51, 0.08);
+    margin-top: 10px;
+    padding: 24px;
+}
+
+#diskUsage {
+    font-size: 1.2rem;
+    font-weight: bold;
+    text-align: center;
+    color: #f5880c;
+    margin-bottom: 4px;
+}
+
+#serverIp {
+    margin-left: 15px;
+    color: #888;
+}
+
+.status {
+    margin-top: 15px;
+    font-size: 24px;
+    font-weight: bold;
+    text-align: center;
+}
+
+.ok {
+    color: #1f9d55;
+}
+
+.warning {
+    color: #d97706;
+}
+
+.critical {
+    color: red;
+}
+
+.unknown {
+    color: gray;
+}
+
+@media (max-width: 760px) {
+    body {
+        padding: 16px;
+    }
+
+    h1 {
+        font-size: 1.8rem;
+    }
+
+    .server-selection {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .charts-container {
+        grid-template-columns: 1fr;
+    }
+}

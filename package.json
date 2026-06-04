@@ -1,0 +1,24 @@
+{
+  "dependencies": {
+    "@grpc/grpc-js": "^1.13.4",
+    "@grpc/proto-loader": "^0.8.0",
+    "better-sqlite3": "^12.9.0",
+    "dotenv": "^17.4.2",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.6.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  },
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "dev:seed": "tsx src/server.ts --seed",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "start:seed": "node dist/server.js --seed",
+    "test": "node --import tsx --test src/**/*.test.ts"
+  }
+}
