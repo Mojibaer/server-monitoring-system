@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package monitoring;
+
+service MonitoringService {
+  rpc SubmitMetrics (AgentMetrics) returns (MetricsAck);
+}
+
+message AgentMetrics {
+  string hostname = 1;
+  string ip_address = 2;
+  double cpu_usage = 3;
+  double ram_usage = 4;
+  double disk_usage = 5;
+}
+
+message MetricsAck {
+  string status = 1;
+  string message = 2;
+}

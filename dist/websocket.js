@@ -2,9 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.startWebSocketServer = startWebSocketServer;
 exports.shutdownWebSocketServer = shutdownWebSocketServer;
+exports.broadcastToFrontends = broadcastToFrontends;
 const ws_1 = require("ws");
-const db_1 = require("./db");
-const metrics_1 = require("./metrics");
+const monitoring_1 = require("./monitoring");
 const frontendClients = new Set();
 let wss;
 let pingInterval;
@@ -34,10 +34,6 @@ function startWebSocketServer(port) {
                 const message = JSON.parse(rawData.toString());
                 if (message.type === "frontend_register") {
                     handleFrontendRegister(ws);
-                    return;
-                }
-                if (message.type === "agent_metrics") {
-                    handleAgentMetrics(ws, message);
                     return;
                 }
                 sendError(ws, "Unknown message type");
@@ -70,89 +66,10 @@ function handleFrontendRegister(ws) {
     ws.clientType = "frontend";
     frontendClients.add(ws);
     console.log(`[FRONTEND] Frontend client registered`);
-    const metrics = db_1.db.prepare(`
-    SELECT
-      hostname,
-      ipAddress,
-      cpuUsage,
-      ramUsage,
-      diskUsage,
-      timestamp
-    FROM (
-      SELECT
-        servers.hostname,
-        servers.ip_address AS ipAddress,
-        metrics.cpu_usage AS cpuUsage,
-        metrics.ram_usage AS ramUsage,
-        metrics.disk_usage AS diskUsage,
-        metrics.created_at AS timestamp,
-        ROW_NUMBER() OVER (
-          PARTITION BY servers.id
-          ORDER BY metrics.created_at DESC
-        ) AS rowNumber
-      FROM metrics
-      JOIN servers
-        ON metrics.server_id = servers.id
-    )
-    WHERE rowNumber <= 20
-    ORDER BY hostname ASC, timestamp ASC
-`).all();
-    const metricsWithStatus = metrics.map((m) => ({
-        ...m,
-        status: (0, metrics_1.calculateStatus)({
-            hostname: m.hostname, cpuUsage: m.cpuUsage, ramUsage: m.ramUsage, diskUsage: m.diskUsage
-        })
-    }));
     sendJson(ws, {
         type: "initial_metrics",
-        payload: metricsWithStatus
+        payload: (0, monitoring_1.getInitialMetrics)()
     });
-}
-function handleAgentMetrics(ws, message) {
-    const { hostname, ipAddress, cpuUsage, ramUsage, diskUsage } = message.payload;
-    ws.clientType = "agent";
-    if (!hostname || typeof hostname !== "string") {
-        sendError(ws, "Invalid field: hostname is required");
-        return;
-    }
-    if (typeof cpuUsage !== "number" || cpuUsage < 0 || cpuUsage > 100) {
-        sendError(ws, "Invalid field: cpuUsage must be a number between 0 and 100");
-        return;
-    }
-    if (typeof ramUsage !== "number" || ramUsage < 0 || ramUsage > 100) {
-        sendError(ws, "Invalid field: ramUsage must be a number between 0 and 100");
-        return;
-    }
-    if (typeof diskUsage !== "number" || diskUsage < 0 || diskUsage > 100) {
-        sendError(ws, "Invalid field: diskUsage must be a number between 0 and 100");
-        return;
-    }
-    const now = new Date().toISOString();
-    db_1.db.prepare(`
-    INSERT INTO servers (hostname, ip_address, last_seen)
-    VALUES (?, ?, ?)
-    ON CONFLICT(hostname) DO UPDATE SET
-      ip_address = excluded.ip_address,
-      last_seen = excluded.last_seen
-  `).run(hostname, ipAddress ?? null, now);
-    const server = db_1.db
-        .prepare(`SELECT id FROM servers WHERE hostname = ?`)
-        .get(hostname);
-    if (!server) {
-        sendError(ws, "Failed to register server in database");
-        return;
-    }
-    db_1.db.prepare(`
-    INSERT INTO metrics (server_id, cpu_usage, ram_usage, disk_usage, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(server.id, cpuUsage, ramUsage, diskUsage, now);
-    const status = (0, metrics_1.calculateStatus)(message.payload);
-    sendJson(ws, { type: "metrics_ack", status });
-    broadcastToFrontends({
-        type: "metrics_update",
-        payload: { hostname, ipAddress: ipAddress ?? null, cpuUsage, ramUsage, diskUsage, status, timestamp: now },
-    });
-    console.log(`[AGENT] Metrics received from ${hostname} — status: ${status}`);
 }
 function broadcastToFrontends(data) {
     console.log(`[BROADCAST] Sent update to ${frontendClients.size} frontend clients`);

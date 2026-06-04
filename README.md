@@ -12,21 +12,21 @@ The system monitors:
 - Hostname and IP address
 - Server status: `OK`, `WARNING`, `CRITICAL`, or `UNKNOWN`
 
-A Python agent collects the metrics and sends them to a Node.js backend through WebSocket. The backend stores the data in SQLite and forwards live updates to the frontend dashboard.
+A Python agent collects the metrics and sends them to a Node.js backend through gRPC. The backend stores the data in SQLite and forwards live updates to the frontend dashboard over WebSocket.
 
 ## Architecture
 
 ```text
-Python Agent  →  WebSocket Backend  →  SQLite Database
+Python Agent  →  gRPC Backend  →  SQLite Database
                         ↓
-                Browser Dashboard
+              WebSocket Dashboard
 ```
 
 ## Technologies
 
-- **Backend:** Node.js, TypeScript, WebSocket (`ws`)
+- **Backend:** Node.js, TypeScript, gRPC, WebSocket (`ws`)
 - **Database:** SQLite
-- **Agent:** Python, psutil, websockets
+- **Agent:** Python, psutil, grpcio
 - **Frontend:** HTML, CSS, JavaScript
 
 ## Project Structure
@@ -107,4 +107,4 @@ The backend evaluates the server status based on the latest metric values:
 
 ## Notes
 
-This project is a small monitoring prototype. It currently uses WebSocket communication and does not include user authentication or a REST API.
+This project is a small monitoring prototype. It uses gRPC for agent-to-backend communication, WebSocket for browser dashboard updates, and does not include user authentication or a REST API.

@@ -1,6 +1,6 @@
 # Monitoring Server — Backend
 
-A Node.js/TypeScript WebSocket server that receives metrics from agents, stores them in SQLite, and broadcasts live updates to connected frontend clients.
+A Node.js/TypeScript backend that receives agent metrics over gRPC, stores them in SQLite, and broadcasts live updates to connected frontend clients over WebSocket.
 
 ## Requirements
 
@@ -30,39 +30,29 @@ npm run dev
 Expected output:
 ```
 WebSocket server started on ws://localhost:8081
-Monitoring Server Started on http://localhost:8081
+gRPC server started on localhost:50051
+Monitoring Server Started
 ```
 
 Stop with `Ctrl+C` — the server shuts down gracefully (closes all connections and the database).
 
 ## Configuration
 
-The port is hard-coded to `8081` in `src/server.ts`. Change it there if needed.
+The dashboard WebSocket port is hard-coded to `8081` in `src/server.ts`. The agent gRPC port is hard-coded to `50051`.
 
-## WebSocket Protocol
+## gRPC Protocol
 
-All messages are JSON. Connect to `ws://localhost:8081`.
+The agent submits metrics through `proto/monitoring.proto`:
 
 ### Agent → Server
 
-**Send metrics:**
-```json
-{
-  "type": "agent_metrics",
-  "payload": {
-    "hostname": "my-server",
-    "ipAddress": "192.168.1.10",
-    "cpuUsage": 45.2,
-    "ramUsage": 60.1,
-    "diskUsage": 70.3
-  }
+```proto
+service MonitoringService {
+  rpc SubmitMetrics (AgentMetrics) returns (MetricsAck);
 }
 ```
 
-Server responds with:
-```json
-{ "type": "metrics_ack", "status": "OK" }
-```
+The server responds with a `MetricsAck` containing the calculated status.
 
 Status is one of: `OK`, `WARNING`, `CRITICAL`
 
@@ -73,6 +63,10 @@ Status is one of: `OK`, `WARNING`, `CRITICAL`
 | Disk | ≥ 80% | ≥ 95% |
 
 ---
+
+## WebSocket Protocol
+
+The browser dashboard still connects to `ws://localhost:8081`.
 
 ### Frontend → Server
 
@@ -150,7 +144,9 @@ SQLite database is stored at `data/monitoring.db` and created automatically on f
 ```
 src/
 ├── server.ts      — entry point, startup and graceful shutdown
-├── websocket.ts   — WebSocket server, message handling, ping/keepalive
+├── grpc.ts        — gRPC server for agent metrics
+├── monitoring.ts  — metric validation, storage, and initial snapshots
+├── websocket.ts   — WebSocket server for dashboard updates
 ├── db.ts          — database connection, schema, seed data
 ├── metrics.ts     — status calculation (OK / WARNING / CRITICAL)
 └── type.ts        — shared TypeScript types

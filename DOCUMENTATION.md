@@ -2,7 +2,7 @@
 
 This document explains the structure, purpose, setup, and internal logic of the Server Monitoring System project.
 
-The project is a lightweight real-time monitoring system. A Python agent runs on a monitored machine and collects CPU, RAM, and disk usage. The agent sends the data to a Node.js/TypeScript backend through WebSocket. The backend stores the data in SQLite, calculates a health status, and sends live updates to a browser dashboard.
+The project is a lightweight real-time monitoring system. A Python agent runs on a monitored machine and collects CPU, RAM, and disk usage. The agent sends the data to a Node.js/TypeScript backend through gRPC. The backend stores the data in SQLite, calculates a health status, and sends live updates to a browser dashboard through WebSocket.
 
 ---
 
@@ -16,7 +16,9 @@ The project is a lightweight real-time monitoring system. A Python agent runs on
   - [4.2 Database: `src/db.ts`](#42-database-srcdbts)
   - [4.3 Types: `src/type.ts`](#43-types-srctypets)
   - [4.4 Status Logic: `src/metrics.ts`](#44-status-logic-srcmetricsts)
-  - [4.5 WebSocket Server: `src/websocket.ts`](#45-websocket-server-srcwebsocketts)
+  - [4.5 Shared Monitoring Logic: `src/monitoring.ts`](#45-shared-monitoring-logic-srcmonitoringts)
+  - [4.6 gRPC Server: `src/grpc.ts`](#46-grpc-server-srcgrpcts)
+  - [4.7 WebSocket Server: `src/websocket.ts`](#47-websocket-server-srcwebsocketts)
 - [5. Frontend](#5-frontend)
   - [5.1 Layout: `frontend/index.html`](#51-layout-frontendindexhtml)
   - [5.2 Logic and Charts: `frontend/script.js`](#52-logic-and-charts-frontendscriptjs)
@@ -47,7 +49,7 @@ The system monitors:
 
 The project is inspired by server monitoring tools such as Nagios, but it is much smaller in scope. It is designed for learning, demonstration, and classroom use.
 
-The current implementation focuses on live WebSocket communication, storing the server status in the database, agent implementation and a simple dashboard. It does not implement REST endpoints, login, authentication, or alert notifications.
+The current implementation focuses on gRPC communication from the agent to the backend, live WebSocket updates from the backend to the dashboard, storing the server status in the database, agent implementation and a simple dashboard. It does not implement REST endpoints, login, authentication, or alert notifications.
 
 ---
 
@@ -58,18 +60,20 @@ The current implementation focuses on live WebSocket communication, storing the 
 | Monitored Machine          |
 | Python Agent               |
 | - psutil                   |
-| - websockets               |
+| - grpcio                   |
 +-------------+-------------+
               |
-              | agent_metrics
-              | WebSocket
+              | SubmitMetrics
+              | gRPC
               v
 +-------------+-------------+
 | Backend Server             |
 | Node.js + TypeScript       |
+| - @grpc/grpc-js            |
 | - ws                       |
 | - better-sqlite3           |
-| Port: 8081                 |
+| gRPC port: 50051           |
+| WebSocket port: 8081       |
 +-------------+-------------+
               |
               | stores data
@@ -79,7 +83,7 @@ The current implementation focuses on live WebSocket communication, storing the 
 | data/monitoring.db         |
 +-------------+-------------+
               |
-              | live updates
+              | live updates over WebSocket
               v
 +-------------+-------------+
 | Browser Dashboard          |
@@ -102,16 +106,16 @@ The system has three main parts:
 
 1. The backend is started with `npm run build` and then `npm run start` or directly `npm run dev` but not recommended for the production. If there is no db to seed / populate db, the program must be started as following `npm run build` then `npm run dev:seed` and at last `npm run start`
 2. The frontend dashboard opens `frontend/index.html` in the browser.
-3. The frontend connects to the backend with WebSocket and sends `frontend_register`.
+3. The frontend connects to the backend with WebSocket on `ws://localhost:8081` and sends `frontend_register`.
 4. The backend sends the latest stored metrics to the frontend as `initial_metrics`.
-5. The Python agent starts and connects to `ws://localhost:8081`.
+5. The Python agent starts and connects to the gRPC server on `localhost:50051`.
 6. Every 60 seconds, the agent collects CPU, RAM, and disk usage.
-7. The agent sends these values as an `agent_metrics` message.
+7. The agent sends these values with the gRPC `SubmitMetrics` method.
 8. The backend validates the incoming values.
 9. The backend creates or updates the related server record in SQLite (if it is first time it adds the entry for the server based on the hostname after that it update the last_seen db column ).
 10. The backend stores the metric row in the `metrics` table.
 11. The backend calculates the current status: `OK`, `WARNING`, or `CRITICAL`.
-12. The backend sends a `metrics_ack` response back to the agent.
+12. The backend sends a `MetricsAck` response back to the agent.
 13. The backend broadcasts a `metrics_update` message to all connected frontend clients.
 14. The dashboard updates the charts and status panel.
 
@@ -124,10 +128,13 @@ The backend source files are located in the `src/` folder.
 ```text
 src/
 |-- server.ts
+|-- grpc.ts
+|-- monitoring.ts
 |-- websocket.ts
 |-- db.ts
 |-- metrics.ts
 |-- type.ts
+|-- grpc.test.ts
 `-- websocket.test.ts
 ```
 
@@ -143,10 +150,17 @@ Main responsibilities:
 
 1. Initialize the SQLite database.
 2. Optionally seed the database with sample data.
-3. Start the WebSocket server on port `8081`.
-4. Handle graceful shutdown when the process receives `SIGINT` or `SIGTERM`.
+3. Start the WebSocket dashboard server on port `8081`.
+4. Start the gRPC agent server on port `50051`.
+5. Handle graceful shutdown when the process receives `SIGINT` or `SIGTERM`.
 
-The backend listens for WebSocket connections on:
+The backend listens for agent gRPC calls on:
+
+```text
+localhost:50051
+```
+
+The backend listens for dashboard WebSocket connections on:
 
 ```text
 ws://localhost:8081
@@ -218,8 +232,8 @@ Important types:
 | Type                  | Description                                       |
 | --------------------- | ------------------------------------------------- |
 | `ServerStatus`        | Can be `OK`, `WARNING`, `CRITICAL`, or `UNKNOWN`  |
-| `AgentMetricsPayload` | The shape of metric data sent by the Python agent |
-| `ClientMessage`       | A generic incoming WebSocket message structure    |
+| `AgentMetricsPayload` | The TypeScript shape of metric data from the agent |
+| `ClientMessage`       | A generic incoming WebSocket dashboard message structure |
 
 Example `AgentMetricsPayload`:
 
@@ -260,18 +274,107 @@ Disk 96%                    -> CRITICAL
 
 ---
 
-### 4.5 WebSocket Server: `src/websocket.ts`
+### 4.5 Shared Monitoring Logic: `src/monitoring.ts`
 
-This is the main backend communication file.
+This file contains reusable backend logic shared by the gRPC server and the WebSocket dashboard server.
 
-It manages two types of connected clients:
+Main responsibilities:
+
+1. Validate agent metric values.
+2. Insert or update the server record in SQLite.
+3. Insert each metric row in the `metrics` table.
+4. Calculate the status with `calculateStatus()`.
+5. Read the latest 20 metrics per server for the dashboard.
+
+This separation keeps the data processing logic independent from the transport protocol.
+
+#### Validation rules
+
+| Field       | Rule                                    |
+| ----------- | --------------------------------------- |
+| `hostname`  | Required and must be a non-empty string |
+| `cpuUsage`  | Must be a number between 0 and 100      |
+| `ramUsage`  | Must be a number between 0 and 100      |
+| `diskUsage` | Must be a number between 0 and 100      |
+
+---
+
+### 4.6 gRPC Server: `src/grpc.ts`
+
+This file starts the backend gRPC server for the Python agent.
+
+The gRPC contract is defined in:
+
+```text
+proto/monitoring.proto
+```
+
+The server listens on:
+
+```text
+localhost:50051
+```
+
+#### Service definition
+
+```proto
+service MonitoringService {
+  rpc SubmitMetrics (AgentMetrics) returns (MetricsAck);
+}
+```
+
+#### AgentMetrics message
+
+```proto
+message AgentMetrics {
+  string hostname = 1;
+  string ip_address = 2;
+  double cpu_usage = 3;
+  double ram_usage = 4;
+  double disk_usage = 5;
+}
+```
+
+#### MetricsAck message
+
+```proto
+message MetricsAck {
+  string status = 1;
+  string message = 2;
+}
+```
+
+#### gRPC request handling
+
+When the agent calls `SubmitMetrics`, the backend:
+
+1. Converts the gRPC request into the internal metric payload shape.
+2. Validates and stores the metrics through `src/monitoring.ts`.
+3. Broadcasts a `metrics_update` message to connected frontend dashboards.
+4. Returns `MetricsAck` with the calculated status.
+
+Example acknowledgement:
+
+```text
+status: "OK"
+message: "Metrics received"
+```
+
+If validation fails, the gRPC call returns `INVALID_ARGUMENT`.
+
+---
+
+### 4.7 WebSocket Server: `src/websocket.ts`
+
+This file manages live communication with browser dashboard clients.
+
+It manages frontend clients:
 
 | Client type | Description                                |
 | ----------- | ------------------------------------------ |
-| `agent`     | A Python script sending system metrics     |
 | `frontend`  | A browser dashboard receiving live updates |
 
-Every new connection starts as `unknown`. The first valid message identifies the client type.
+Every new connection starts as `unknown`. A `frontend_register` message identifies the client as a dashboard.
 
 #### Keepalive behavior
 
@@ -316,43 +419,9 @@ Example response:
 }
 ```
 
-#### Incoming message: `agent_metrics`
+#### Broadcast message: `metrics_update`
 
-Sent by the Python agent every 60 seconds.
-
-```json
-{
-  "type": "agent_metrics",
-  "payload": {
-    "hostname": "DESKTOP-123",
-    "ipAddress": "192.168.1.100",
-    "cpuUsage": 25.4,
-    "ramUsage": 68.2,
-    "diskUsage": 54.6
-  }
-}
-```
-
-Backend behavior:
-
-1. Marks the connection as an agent client.
-2. Validates all required fields.
-3. Inserts or updates the server record.
-4. Inserts a new metric row.
-5. Calculates the status.
-6. Sends `metrics_ack` to the agent.
-7. Broadcasts `metrics_update` to all registered frontend clients.
-
-Response to the agent:
-
-```json
-{
-  "type": "metrics_ack",
-  "status": "OK"
-}
-```
-
-Broadcast to frontends:
+When the gRPC server receives and stores new agent metrics, it calls `broadcastToFrontends()` in `src/websocket.ts`. Registered dashboards receive:
 
 ```json
 {
@@ -368,15 +437,6 @@ Broadcast to frontends:
   }
 }
 ```
-
-#### Validation rules
-
-| Field       | Rule                                    |
-| ----------- | --------------------------------------- |
-| `hostname`  | Required and must be a non-empty string |
-| `cpuUsage`  | Must be a number between 0 and 100      |
-| `ramUsage`  | Must be a number between 0 and 100      |
-| `diskUsage` | Must be a number between 0 and 100      |
 
 Invalid messages receive an error response and are not stored.
 
@@ -551,7 +611,7 @@ It is responsible for collecting local machine metrics and sending them to the b
 Important constants:
 
 ```python
-BACKEND_URL = "ws://localhost:8081"
+BACKEND_URL = "localhost:50051"
 INTERVAL_SECONDS = 60
 RETRY_DELAY = 5
 ```
@@ -575,28 +635,27 @@ For disk usage, the script checks:
 
 ### Sending metrics
 
-The agent sends a JSON message with this structure:
+The agent sends metrics with a gRPC unary call to:
 
-```json
-{
-  "type": "agent_metrics",
-  "payload": {
-    "hostname": "DESKTOP-123",
-    "ipAddress": "192.168.1.100",
-    "cpuUsage": 25.4,
-    "ramUsage": 68.2,
-    "diskUsage": 54.6
-  }
-}
+```text
+/monitoring.MonitoringService/SubmitMetrics
 ```
 
-After sending, it waits for a backend acknowledgement:
+The request matches the `AgentMetrics` message from `proto/monitoring.proto`:
 
-```json
-{
-  "type": "metrics_ack",
-  "status": "OK"
-}
+```text
+hostname: "DESKTOP-123"
+ip_address: "192.168.1.100"
+cpu_usage: 25.4
+ram_usage: 68.2
+disk_usage: 54.6
+```
+
+After sending, it waits for a `MetricsAck` response:
+
+```text
+status: "OK"
+message: "Metrics received"
 ```
 
 ### Reconnection behavior
@@ -674,13 +733,15 @@ Expected output:
 
 ```text
 WebSocket server started on ws://localhost:8081
-Monitoring Server Started on http://localhost:8081
+gRPC server started on localhost:50051
+Monitoring Server Started
 ```
 
-The important address is:
+The important addresses are:
 
 ```text
-ws://localhost:8081
+Agent gRPC: localhost:50051
+Dashboard WebSocket: ws://localhost:8081
 ```
 
 Keep this terminal open.
@@ -766,10 +827,10 @@ python agent.py
 Expected output:
 
 ```text
-[*] Connecting to ws://localhost:8081...
+[*] Connecting to localhost:50051...
 [+] Connected
 [>] Sent metrics: {'hostname': 'DESKTOP-123', ...}
-[<] Server: {"type":"metrics_ack","status":"OK"}
+[<] Server: Metrics received (OK)
 ```
 
 ---
@@ -801,19 +862,20 @@ Ctrl + C
 By default, both frontend and agent use:
 
 ```text
-ws://localhost:8081
+Agent: localhost:50051
+Frontend: ws://localhost:8081
 ```
 
 This works only when everything runs on the same machine.
 
-If the backend runs on another computer, update the WebSocket address.
+If the backend runs on another computer, update the gRPC agent address and the frontend WebSocket address.
 
 ### Update the Python agent
 
 In `ClientAgent/agent.py`:
 
 ```python
-BACKEND_URL = "ws://192.168.1.100:8081"
+BACKEND_URL = "192.168.1.100:50051"
 ```
 
 Replace `192.168.1.100` with the backend machine's IP address.
@@ -834,7 +896,7 @@ const socket = new WebSocket("ws://192.168.1.100:8081");
 
 ### Firewall
 
-The backend machine must allow incoming TCP connections on port `8081`.
+The backend machine must allow incoming TCP connections on port `50051` for the agent and port `8081` for the dashboard.
 
 ---
 
@@ -843,6 +905,7 @@ The backend machine must allow incoming TCP connections on port `8081`.
 Tests are located in:
 
 ```text
+src/grpc.test.ts
 src/websocket.test.ts
 ```
 
@@ -852,19 +915,19 @@ Run tests with:
 npm test
 ```
 
-The tests start a WebSocket server on port `8090`, separate from the normal application port `8081`.
+The tests start a gRPC server on port `50052` and a WebSocket server on port `8090`, separate from the normal application ports `50051` and `8081`.
 
 Test coverage includes:
 
 | Test                                       | Purpose                                |
 | ------------------------------------------ | -------------------------------------- |
+| Agent can submit metrics over gRPC         | Checks `SubmitMetrics` acknowledgement |
 | Client can connect                         | Checks basic WebSocket connection      |
 | Frontend receives initial metrics          | Checks `frontend_register` behavior    |
 | Invalid JSON returns error                 | Checks error handling                  |
-| Agent metrics returns ack                  | Checks `agent_metrics` acknowledgement |
 | Frontend receives metrics update broadcast | Checks live broadcasting               |
 
-Important note: the tests use the same SQLite database file. Test server names such as `test-agent` and `broadcast-test` may be written into `data/monitoring.db`.
+Important note: the tests use the same SQLite database file. Test server names such as `grpc-test-agent` and `broadcast-test` may be written into `data/monitoring.db`.
 
 ---
 
@@ -874,6 +937,8 @@ Important note: the tests use the same SQLite database file. Test server names s
 
 | Package                 | Type        | Purpose                                                  |
 | ----------------------- | ----------- | -------------------------------------------------------- |
+| `@grpc/grpc-js`         | Runtime     | gRPC server implementation for Node.js                   |
+| `@grpc/proto-loader`    | Runtime     | Loads the `.proto` file at runtime                       |
 | `better-sqlite3`        | Runtime     | SQLite database access                                   |
 | `ws`                    | Runtime     | WebSocket server and client                              |
 | `dotenv`                | Runtime     | Listed dependency; not actively used in the current code |
@@ -906,7 +971,8 @@ ClientAgent/requirements.txt
 | Package      | Purpose                       |
 | ------------ | ----------------------------- |
 | `psutil`     | Read CPU, RAM, and disk usage |
-| `websockets` | WebSocket client connection   |
+| `grpcio`     | gRPC client connection        |
+| `grpcio-tools` | gRPC/protobuf tooling       |
 
 ---
 
@@ -917,7 +983,7 @@ ClientAgent/requirements.txt
 - No REST API endpoints are implemented.
 - No login, authentication, or role-based authorization is implemented.
 - No notification system is implemented.
-- WebSocket URLs are hardcoded in the frontend and Python agent.
+- The gRPC agent address and WebSocket dashboard URL are hardcoded.
 - SQLite is used as a local database and is not intended for large-scale production monitoring.
 - The frontend is static and does not have a build or deployment pipeline.
 - The backend does not provide a separate HTTP API for historical data queries.

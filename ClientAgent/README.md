@@ -1,11 +1,11 @@
 # ClientAgent
 
-A Python agent that collects system metrics (CPU, RAM, disk) and streams them to the monitoring server over WebSocket.
+A Python agent that collects system metrics (CPU, RAM, disk) and sends them to the monitoring server over gRPC.
 
 ## Requirements
 
 - Python 3.8+
-- The monitoring server must be running on `ws://localhost:8081` before starting the agent
+- The monitoring server must be running on `localhost:50051` before starting the agent
 
 ## Setup
 
@@ -27,10 +27,10 @@ python agent.py
 
 Expected output:
 ```
-[*] Connecting to ws://localhost:8081...
+[*] Connecting to localhost:50051...
 [+] Connected
-[>] Sent metrics: {'hostname': 'my-pc', 'cpuUsage': 12.5, 'ramUsage': 60.3, 'diskUsage': 45.1}
-[<] Server: {"type":"metrics_ack","status":"OK"}
+[>] Sent metrics: {'hostname': 'my-pc', 'ip_address': '192.168.1.10', 'cpu_usage': 12.5, 'ram_usage': 60.3, 'disk_usage': 45.1}
+[<] Server: Metrics received (OK)
 ```
 
 The agent will send metrics every **60 seconds** and automatically reconnect if the connection drops.
@@ -41,7 +41,7 @@ Edit the constants at the top of `agent.py` to change the defaults:
 
 | Variable | Default | Description |
 |---|---|---|
-| `BACKEND_URL` | `ws://localhost:8081` | WebSocket server address |
+| `BACKEND_URL` | `localhost:50051` | gRPC server address |
 | `INTERVAL_SECONDS` | `60` | How often metrics are sent |
 | `RETRY_DELAY` | `5` | Seconds to wait before reconnecting |
 

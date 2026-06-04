@@ -1,5 +1,6 @@
 import { db, initDatabase, seedDatabase } from "./db";
 import { startWebSocketServer, shutdownWebSocketServer } from "./websocket";
+import { startGrpcServer, shutdownGrpcServer } from "./grpc";
 
 initDatabase();
 
@@ -9,10 +10,12 @@ if (process.argv.includes("--seed")) {
 }
 
 startWebSocketServer(8081);
-console.log("Monitoring Server Started on http://localhost:8081");
+startGrpcServer(50051);
+console.log("Monitoring Server Started");
 
 async function shutdown(signal: string) {
     console.log(`\n[${signal}] Shutting down gracefully...`);
+    await shutdownGrpcServer();
     await shutdownWebSocketServer();
     db.close();
     console.log("Server stopped.");

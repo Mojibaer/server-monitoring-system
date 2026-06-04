@@ -2,15 +2,18 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const db_1 = require("./db");
 const websocket_1 = require("./websocket");
+const grpc_1 = require("./grpc");
 (0, db_1.initDatabase)();
 if (process.argv.includes("--seed")) {
     (0, db_1.seedDatabase)();
     console.log("Database seeded");
 }
 (0, websocket_1.startWebSocketServer)(8081);
-console.log("Monitoring Server Started on http://localhost:8081");
+(0, grpc_1.startGrpcServer)(50051);
+console.log("Monitoring Server Started");
 async function shutdown(signal) {
     console.log(`\n[${signal}] Shutting down gracefully...`);
+    await (0, grpc_1.shutdownGrpcServer)();
     await (0, websocket_1.shutdownWebSocketServer)();
     db_1.db.close();
     console.log("Server stopped.");

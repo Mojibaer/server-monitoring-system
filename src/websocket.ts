@@ -1,34 +1,18 @@
 import { WebSocketServer, WebSocket } from "ws";
-import { db } from "./db";
-import { calculateStatus } from "./metrics";
-import { AgentMetricsPayload } from "./type";
+import { getInitialMetrics } from "./monitoring";
 
-type ClientType = "agent" | "frontend" | "unknown";
+type ClientType = "frontend" | "unknown";
 
 interface ExtendedWebSocket extends WebSocket {
   clientType: ClientType;
   isAlive: boolean;
 }
 
-interface AgentMetricsMessage {
-  type: "agent_metrics";
-  payload: AgentMetricsPayload;
-}
-
 interface RegisterFrontendMessage {
   type: "frontend_register";
 }
 
-type ClientMessage = AgentMetricsMessage | RegisterFrontendMessage;
-
-interface MetricRow {
-  hostname: string;
-  ipAddress: string | null;
-  cpuUsage: number;
-  ramUsage: number;
-  diskUsage: number;
-  timestamp: string;
-}
+type ClientMessage = RegisterFrontendMessage;
 
 const frontendClients = new Set<ExtendedWebSocket>();
 let wss: WebSocketServer;
@@ -69,11 +53,6 @@ export function startWebSocketServer(port: number) {
           return;
         }
 
-        if (message.type === "agent_metrics") {
-          handleAgentMetrics(ws, message);
-          return;
-        }
-
         sendError(ws, "Unknown message type");
       } catch {
         sendError(ws, "Invalid JSON message");
@@ -109,109 +88,14 @@ function handleFrontendRegister(ws: ExtendedWebSocket) {
   ws.clientType = "frontend";
   frontendClients.add(ws);
   console.log(`[FRONTEND] Frontend client registered`);
-  const metrics = db.prepare(`
-    SELECT
-      hostname,
-      ipAddress,
-      cpuUsage,
-      ramUsage,
-      diskUsage,
-      timestamp
-    FROM (
-      SELECT
-        servers.hostname,
-        servers.ip_address AS ipAddress,
-        metrics.cpu_usage AS cpuUsage,
-        metrics.ram_usage AS ramUsage,
-        metrics.disk_usage AS diskUsage,
-        metrics.created_at AS timestamp,
-        ROW_NUMBER() OVER (
-          PARTITION BY servers.id
-          ORDER BY metrics.created_at DESC
-        ) AS rowNumber
-      FROM metrics
-      JOIN servers
-        ON metrics.server_id = servers.id
-    )
-    WHERE rowNumber <= 20
-    ORDER BY hostname ASC, timestamp ASC
-`).all();
-
-  const metricsWithStatus = (metrics as MetricRow[]).map((m) => ({
-    ...m,
-    status: calculateStatus({
-      hostname: m.hostname, cpuUsage: m.cpuUsage, ramUsage: m.ramUsage, diskUsage: m.diskUsage
-    })
-  }));
 
   sendJson(ws, {
     type: "initial_metrics",
-    payload: metricsWithStatus
+    payload: getInitialMetrics()
   });
-
-
 }
 
-function handleAgentMetrics(ws: ExtendedWebSocket, message: AgentMetricsMessage) {
-  const { hostname, ipAddress, cpuUsage, ramUsage, diskUsage } = message.payload;
-
-  ws.clientType = "agent";
-
-  if (!hostname || typeof hostname !== "string") {
-    sendError(ws, "Invalid field: hostname is required");
-    return;
-  }
-  if (typeof cpuUsage !== "number" || cpuUsage < 0 || cpuUsage > 100) {
-    sendError(ws, "Invalid field: cpuUsage must be a number between 0 and 100");
-    return;
-  }
-  if (typeof ramUsage !== "number" || ramUsage < 0 || ramUsage > 100) {
-    sendError(ws, "Invalid field: ramUsage must be a number between 0 and 100");
-    return;
-  }
-  if (typeof diskUsage !== "number" || diskUsage < 0 || diskUsage > 100) {
-    sendError(ws, "Invalid field: diskUsage must be a number between 0 and 100");
-    return;
-  }
-
-  const now = new Date().toISOString();
-
-  db.prepare(`
-    INSERT INTO servers (hostname, ip_address, last_seen)
-    VALUES (?, ?, ?)
-    ON CONFLICT(hostname) DO UPDATE SET
-      ip_address = excluded.ip_address,
-      last_seen = excluded.last_seen
-  `).run(hostname, ipAddress ?? null, now);
-
-  const server = db
-    .prepare(`SELECT id FROM servers WHERE hostname = ?`)
-    .get(hostname) as { id: number } | undefined;
-
-  if (!server) {
-    sendError(ws, "Failed to register server in database");
-    return;
-  }
-
-  db.prepare(`
-    INSERT INTO metrics (server_id, cpu_usage, ram_usage, disk_usage, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(server.id, cpuUsage, ramUsage, diskUsage, now);
-
-  const status = calculateStatus(message.payload);
-
-  sendJson(ws, { type: "metrics_ack", status });
-
-  broadcastToFrontends({
-
-    type: "metrics_update",
-    payload: { hostname, ipAddress: ipAddress ?? null, cpuUsage, ramUsage, diskUsage, status, timestamp: now },
-  });
-
-  console.log(`[AGENT] Metrics received from ${hostname} — status: ${status}`);
-}
-
-function broadcastToFrontends(data: object) {
+export function broadcastToFrontends(data: object) {
   console.log(`[BROADCAST] Sent update to ${frontendClients.size} frontend clients`);
   for (const client of frontendClients) {
     if (client.readyState === WebSocket.OPEN) {
