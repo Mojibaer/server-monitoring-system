@@ -48,10 +48,14 @@ def build_messages():
 
 AgentMetrics, MetricsAck = build_messages()
 
-
 def get_ip_address():
     try:
-        return socket.gethostbyname(socket.gethostname())
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))   # no real traffic, just picks the routing interface
+            return s.getsockname()[0]
+        finally:
+            s.close()
     except Exception:
         return None
 
@@ -71,34 +75,49 @@ def collect_metrics():
     )
 
 
+async def connect():
+    """Open the channel and return it together with the ready submit function."""
+    channel = grpc.aio.insecure_channel(BACKEND_URL)
+    submit_metrics = channel.unary_unary(
+        "/monitoring.MonitoringService/SubmitMetrics",
+        request_serializer=AgentMetrics.SerializeToString,
+        response_deserializer=MetricsAck.FromString,
+    )
+    await channel.channel_ready()
+    return channel, submit_metrics
+
+
+def log_metrics(data, response):
+    """Print the metrics that were sent and the server's reply."""
+    print("[>] Sent metrics:", {
+        "hostname": data.hostname,
+        "ip_address": data.ip_address or None,
+        "cpu_usage": data.cpu_usage,
+        "ram_usage": data.ram_usage,
+        "disk_usage": data.disk_usage,
+    })
+    print(f"[<] Server: {response.message} ({response.status})")
+
+
+async def send_loop(submit_metrics):
+    """Send metrics on a fixed interval for as long as the connection holds."""
+    while True:
+        data = collect_metrics()
+        response = await submit_metrics(data, timeout=10)
+        log_metrics(data, response)
+        await asyncio.sleep(INTERVAL_SECONDS)
+
+
 async def run_agent():
+    """Keep the connection alive and reconnect whenever it drops."""
     while True:
         try:
             print(f"[*] Connecting to {BACKEND_URL}...")
+            channel, submit_metrics = await connect()
+            print("[+] Connected")
 
-            async with grpc.aio.insecure_channel(BACKEND_URL) as channel:
-                submit_metrics = channel.unary_unary(
-                    "/monitoring.MonitoringService/SubmitMetrics",
-                    request_serializer=AgentMetrics.SerializeToString,
-                    response_deserializer=MetricsAck.FromString,
-                )
-                await channel.channel_ready()
-                print("[+] Connected")
-
-                while True:
-                    data = collect_metrics()
-                    response = await submit_metrics(data, timeout=10)
-
-                    print("[>] Sent metrics:", {
-                        "hostname": data.hostname,
-                        "ip_address": data.ip_address or None,
-                        "cpu_usage": data.cpu_usage,
-                        "ram_usage": data.ram_usage,
-                        "disk_usage": data.disk_usage,
-                    })
-                    print(f"[<] Server: {response.message} ({response.status})")
-
-                    await asyncio.sleep(INTERVAL_SECONDS)
+            async with channel:
+                await send_loop(submit_metrics)
 
         except (ConnectionRefusedError, OSError, grpc.RpcError, asyncio.TimeoutError) as e:
             print(f"[!] Connection lost: {e}")

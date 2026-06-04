@@ -73,28 +73,18 @@ Open a second terminal:
 
 ```bash
 cd ClientAgent
-python -m venv venv
 ```
 
-On Windows PowerShell:
-
-```powershell
-.\venv\Scripts\Activate.ps1
-```
-
-If script execution is blocked, run:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\venv\Scripts\Activate.ps1
-```
-
-Then install the dependencies and start the agent:
+Make sure [uv](https://docs.astral.sh/uv/) is installed, then install the
+dependencies and start the agent:
 
 ```bash
-pip install -r requirements.txt
-python agent.py
+uv sync
+uv run agent.py
 ```
+
+`uv` creates and manages the virtual environment automatically, so no manual
+activation is required.
 
 ## Status Rules
 
