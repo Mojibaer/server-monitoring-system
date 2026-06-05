@@ -2,7 +2,7 @@ import path from "node:path";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import { storeAgentMetrics } from "./monitoring";
-import { broadcastToFrontends } from "./websocket";
+import { broadcastToFrontends } from "./sse";
 
 interface AgentMetricsRequest {
   hostname?: string;
