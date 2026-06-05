@@ -5,24 +5,20 @@ A Python agent that collects system metrics (CPU, RAM, disk) and sends them to t
 ## Requirements
 
 - Python 3.8+
+- [uv](https://docs.astral.sh/uv/) installed
 - The monitoring server must be running on `localhost:50051` before starting the agent
 
 ## Setup
 
 ```bash
-# Create and activate virtual environment
-python -m venv venv
-venv\Scripts\activate        # Windows
-source venv/bin/activate     # Linux / macOS
-
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (creates and manages the virtual environment automatically)
+uv sync
 ```
 
 ## Run
 
 ```bash
-python agent.py
+uv run agent.py
 ```
 
 Expected output:
