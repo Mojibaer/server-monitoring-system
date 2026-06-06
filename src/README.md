@@ -1,6 +1,6 @@
 # Monitoring Server — Backend
 
-A Node.js/TypeScript backend that receives agent metrics over gRPC, stores them in SQLite, and broadcasts live updates to connected frontend clients over WebSocket.
+A Node.js/TypeScript backend that receives agent metrics over gRPC, stores them in SQLite, and broadcasts live updates to connected frontend clients over Server-Sent Events (SSE).
 
 ## Requirements
 
@@ -29,7 +29,7 @@ npm run dev
 
 Expected output:
 ```
-WebSocket server started on ws://localhost:8081
+SSE server started on http://localhost:8081/events
 gRPC server started on localhost:50051
 Monitoring Server Started
 ```
@@ -38,7 +38,7 @@ Stop with `Ctrl+C` — the server shuts down gracefully (closes all connections 
 
 ## Configuration
 
-The dashboard WebSocket port is hard-coded to `8081` in `src/server.ts`. The agent gRPC port is hard-coded to `50051`.
+The dashboard SSE port is hard-coded to `8081` in `src/server.ts`. The agent gRPC port is hard-coded to `50051`.
 
 ## gRPC Protocol
 
@@ -64,18 +64,15 @@ Status is one of: `OK`, `WARNING`, `CRITICAL`
 
 ---
 
-## WebSocket Protocol
+## SSE Protocol
 
-The browser dashboard still connects to `ws://localhost:8081`.
+The browser dashboard connects to the SSE endpoint `http://localhost:8081/events`
+with the native `EventSource` API. SSE is one-way (server → browser), so the
+dashboard does not send any messages — it just listens.
 
-### Frontend → Server
+### Server → Frontend
 
-**Register as a dashboard client:**
-```json
-{ "type": "frontend_register" }
-```
-
-Server immediately responds with the latest snapshot of all known servers:
+As soon as a client connects, the server sends the latest snapshot of all known servers:
 ```json
 {
   "type": "initial_metrics",
@@ -92,7 +89,7 @@ Server immediately responds with the latest snapshot of all known servers:
 }
 ```
 
-After registering, the frontend receives a live broadcast every time any agent sends metrics:
+After that, the frontend receives a live event every time any agent sends metrics:
 ```json
 {
   "type": "metrics_update",
@@ -108,12 +105,9 @@ After registering, the frontend receives a live broadcast every time any agent s
 }
 ```
 
-### Error response
-
-Any invalid message returns:
-```json
-{ "type": "error", "message": "Invalid field: ramUsage must be a number between 0 and 100" }
-```
+Each event is sent as one SSE frame in the form `data: <json>\n\n`. Agent-side
+validation errors are reported back to the agent over gRPC (`INVALID_ARGUMENT`),
+not to the dashboard.
 
 ## Database
 
@@ -146,7 +140,7 @@ src/
 ├── server.ts      — entry point, startup and graceful shutdown
 ├── grpc.ts        — gRPC server for agent metrics
 ├── monitoring.ts  — metric validation, storage, and initial snapshots
-├── websocket.ts   — WebSocket server for dashboard updates
+├── sse.ts         — SSE server for dashboard updates
 ├── db.ts          — database connection, schema, seed data
 ├── metrics.ts     — status calculation (OK / WARNING / CRITICAL)
 └── type.ts        — shared TypeScript types

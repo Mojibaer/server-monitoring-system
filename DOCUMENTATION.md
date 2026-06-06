@@ -2,7 +2,7 @@
 
 This document explains the structure, purpose, setup, and internal logic of the Server Monitoring System project.
 
-The project is a lightweight real-time monitoring system. A Python agent runs on a monitored machine and collects CPU, RAM, and disk usage. The agent sends the data to a Node.js/TypeScript backend through gRPC. The backend stores the data in SQLite, calculates a health status, and sends live updates to a browser dashboard through WebSocket.
+The project is a lightweight real-time monitoring system. A Python agent runs on a monitored machine and collects CPU, RAM, and disk usage. The agent sends the data to a Node.js/TypeScript backend through gRPC. The backend stores the data in SQLite, calculates a health status, and sends live updates to a browser dashboard through Server-Sent Events (SSE).
 
 ---
 
@@ -18,7 +18,7 @@ The project is a lightweight real-time monitoring system. A Python agent runs on
   - [4.4 Status Logic: `src/metrics.ts`](#44-status-logic-srcmetricsts)
   - [4.5 Shared Monitoring Logic: `src/monitoring.ts`](#45-shared-monitoring-logic-srcmonitoringts)
   - [4.6 gRPC Server: `src/grpc.ts`](#46-grpc-server-srcgrpcts)
-  - [4.7 WebSocket Server: `src/websocket.ts`](#47-websocket-server-srcwebsocketts)
+  - [4.7 SSE Server: `src/sse.ts`](#47-sse-server-srcssets)
 - [5. Frontend](#5-frontend)
   - [5.1 Layout: `frontend/index.html`](#51-layout-frontendindexhtml)
   - [5.2 Logic and Charts: `frontend/script.js`](#52-logic-and-charts-frontendscriptjs)
@@ -49,7 +49,7 @@ The system monitors:
 
 The project is inspired by server monitoring tools such as Nagios, but it is much smaller in scope. It is designed for learning, demonstration, and classroom use.
 
-The current implementation focuses on gRPC communication from the agent to the backend, live WebSocket updates from the backend to the dashboard, storing the server status in the database, agent implementation and a simple dashboard. It does not implement REST endpoints, login, authentication, or alert notifications.
+The current implementation focuses on gRPC communication from the agent to the backend, live SSE updates from the backend to the dashboard, storing the server status in the database, agent implementation and a simple dashboard. It does not implement REST endpoints, login, authentication, or alert notifications.
 
 ---
 
@@ -70,10 +70,10 @@ The current implementation focuses on gRPC communication from the agent to the b
 | Backend Server             |
 | Node.js + TypeScript       |
 | - @grpc/grpc-js            |
-| - ws                       |
+| - node:http (SSE)          |
 | - better-sqlite3           |
 | gRPC port: 50051           |
-| WebSocket port: 8081       |
+| SSE port: 8081             |
 +-------------+-------------+
               |
               | stores data
@@ -83,7 +83,7 @@ The current implementation focuses on gRPC communication from the agent to the b
 | data/monitoring.db         |
 +-------------+-------------+
               |
-              | live updates over WebSocket
+              | live updates over SSE
               v
 +-------------+-------------+
 | Browser Dashboard          |
@@ -106,8 +106,8 @@ The system has three main parts:
 
 1. The backend is started with `npm run build` and then `npm run start` or directly `npm run dev` but not recommended for the production. If there is no db to seed / populate db, the program must be started as following `npm run build` then `npm run dev:seed` and at last `npm run start`
 2. The frontend dashboard opens `frontend/index.html` in the browser.
-3. The frontend connects to the backend with WebSocket on `ws://localhost:8081` and sends `frontend_register`.
-4. The backend sends the latest stored metrics to the frontend as `initial_metrics`.
+3. The frontend connects to the backend SSE endpoint on `http://localhost:8081/events`.
+4. The backend immediately sends the latest stored metrics to the frontend as `initial_metrics`.
 5. The Python agent starts and connects to the gRPC server on `localhost:50051`.
 6. Every 60 seconds, the agent collects CPU, RAM, and disk usage.
 7. The agent sends these values with the gRPC `SubmitMetrics` method.
@@ -116,7 +116,7 @@ The system has three main parts:
 10. The backend stores the metric row in the `metrics` table.
 11. The backend calculates the current status: `OK`, `WARNING`, or `CRITICAL`.
 12. The backend sends a `MetricsAck` response back to the agent.
-13. The backend broadcasts a `metrics_update` message to all connected frontend clients.
+13. The backend broadcasts a `metrics_update` event to all connected frontend clients over SSE.
 14. The dashboard updates the charts and status panel.
 
 ---
@@ -130,12 +130,12 @@ src/
 |-- server.ts
 |-- grpc.ts
 |-- monitoring.ts
-|-- websocket.ts
+|-- sse.ts
 |-- db.ts
 |-- metrics.ts
 |-- type.ts
 |-- grpc.test.ts
-`-- websocket.test.ts
+`-- sse.test.ts
 ```
 
 The backend is written in TypeScript and can be run directly in development mode with `tsx`.
@@ -150,7 +150,7 @@ Main responsibilities:
 
 1. Initialize the SQLite database.
 2. Optionally seed the database with sample data.
-3. Start the WebSocket dashboard server on port `8081`.
+3. Start the SSE dashboard server on port `8081`.
 4. Start the gRPC agent server on port `50051`.
 5. Handle graceful shutdown when the process receives `SIGINT` or `SIGTERM`.
 
@@ -160,10 +160,10 @@ The backend listens for agent gRPC calls on:
 localhost:50051
 ```
 
-The backend listens for dashboard WebSocket connections on:
+The backend listens for dashboard SSE connections on:
 
 ```text
-ws://localhost:8081
+http://localhost:8081/events
 ```
 
 ---
@@ -233,7 +233,7 @@ Important types:
 | --------------------- | ------------------------------------------------- |
 | `ServerStatus`        | Can be `OK`, `WARNING`, `CRITICAL`, or `UNKNOWN`  |
 | `AgentMetricsPayload` | The TypeScript shape of metric data from the agent |
-| `ClientMessage`       | A generic incoming WebSocket dashboard message structure |
+| `StoredMetric`        | A stored metric enriched with status and timestamp |
 
 Example `AgentMetricsPayload`:
 
@@ -276,7 +276,7 @@ Disk 96%                    -> CRITICAL
 
 ### 4.5 Shared Monitoring Logic: `src/monitoring.ts`
 
-This file contains reusable backend logic shared by the gRPC server and the WebSocket dashboard server.
+This file contains reusable backend logic shared by the gRPC server and the SSE dashboard server.
 
 Main responsibilities:
 
@@ -350,7 +350,7 @@ When the agent calls `SubmitMetrics`, the backend:
 
 1. Converts the gRPC request into the internal metric payload shape.
 2. Validates and stores the metrics through `src/monitoring.ts`.
-3. Broadcasts a `metrics_update` message to connected frontend dashboards.
+3. Broadcasts a `metrics_update` event to connected frontend dashboards over SSE.
 4. Returns `MetricsAck` with the calculated status.
 
 Example acknowledgement:
@@ -364,43 +364,42 @@ If validation fails, the gRPC call returns `INVALID_ARGUMENT`.
 
 ---
 
-### 4.7 WebSocket Server: `src/websocket.ts`
+### 4.7 SSE Server: `src/sse.ts`
 
-This file manages live communication with browser dashboard clients.
+This file manages live communication with browser dashboard clients using
+Server-Sent Events (SSE). It runs a plain `node:http` server that exposes a
+single streaming endpoint:
 
-It manages frontend clients:
-
-| Client type | Description                                |
-| ----------- | ------------------------------------------ |
-| `frontend`  | A browser dashboard receiving live updates |
-
-Every new connection starts as `unknown`. A `frontend_register` message identifies the client as a dashboard.
-
-#### Keepalive behavior
-
-The WebSocket server uses a ping/pong check every 30 seconds.
-
-If a client does not respond, it is removed and the connection is terminated. This prevents dead connections from staying in memory.
-
-#### Incoming message: `frontend_register`
-
-Sent by the dashboard when it opens.
-
-```json
-{
-  "type": "frontend_register"
-}
+```text
+GET http://localhost:8081/events
 ```
 
-Backend behavior:
+SSE is a one-way channel: the server pushes events to the browser, and the
+browser never sends messages back. Because of that there is no client
+registration step and no keepalive ping/pong — the browser's `EventSource`
+reconnects automatically if the stream drops.
 
-1. Marks the connection as a frontend client.
-2. Adds the connection to the frontend client set.
+#### Connection handling
+
+When a dashboard opens the `/events` endpoint, the backend:
+
+1. Responds with the SSE headers (`Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`).
+2. Adds the open response to the frontend client set.
 3. Reads the latest 20 metrics per server from SQLite.
 4. Calculates the status for each metric row.
-5. Sends the data back as `initial_metrics`.
+5. Immediately sends the data as an `initial_metrics` event.
 
-Example response:
+When the request closes, the connection is removed from the client set.
+
+Each event is written to the stream as a single SSE frame:
+
+```text
+data: <json>\n\n
+```
+
+#### Initial event: `initial_metrics`
+
+Sent automatically as soon as the dashboard connects.
 
 ```json
 {
@@ -419,9 +418,9 @@ Example response:
 }
 ```
 
-#### Broadcast message: `metrics_update`
+#### Broadcast event: `metrics_update`
 
-When the gRPC server receives and stores new agent metrics, it calls `broadcastToFrontends()` in `src/websocket.ts`. Registered dashboards receive:
+When the gRPC server receives and stores new agent metrics, it calls `broadcastToFrontends()` in `src/sse.ts`. All connected dashboards receive:
 
 ```json
 {
@@ -438,16 +437,9 @@ When the gRPC server receives and stores new agent metrics, it calls `broadcastT
 }
 ```
 
-Invalid messages receive an error response and are not stored.
-
-Example error:
-
-```json
-{
-  "type": "error",
-  "message": "Invalid field: cpuUsage must be a number between 0 and 100"
-}
-```
+Agent metrics that fail validation are rejected at the gRPC layer
+(`INVALID_ARGUMENT`) and never reach the dashboard, so no error event is sent
+over SSE.
 
 ---
 
@@ -508,9 +500,8 @@ This file contains most of the frontend behavior.
 
 Main responsibilities:
 
-1. Connect to the backend with WebSocket.
-2. Register the dashboard with `frontend_register`.
-3. Receive `initial_metrics` and `metrics_update` messages.
+1. Connect to the backend SSE endpoint with `EventSource`.
+2. Receive `initial_metrics` and `metrics_update` events.
 4. Store recent metrics per server.
 5. Update the server dropdown.
 6. Draw CPU and RAM charts.
@@ -518,12 +509,12 @@ Main responsibilities:
 8. Detect stale servers.
 9. Cache recent data in `localStorage`.
 
-#### WebSocket connection
+#### SSE connection
 
 The frontend connects to:
 
 ```javascript
-const socket = new WebSocket("ws://localhost:8081");
+const eventSource = new EventSource("http://localhost:8081/events");
 ```
 
 If the backend runs on another computer, this address must be changed.
@@ -559,7 +550,7 @@ Purpose:
 
 - Keep the latest visible metrics in the browser
 - Restore the last selected server after refresh
-- Show cached data immediately before fresh WebSocket data arrives
+- Show cached data immediately before fresh SSE data arrives
 
 The main persistent storage is still SQLite. The frontend cache is only a convenience feature.
 
@@ -732,7 +723,7 @@ npm run dev:seed
 Expected output:
 
 ```text
-WebSocket server started on ws://localhost:8081
+SSE server started on http://localhost:8081/events
 gRPC server started on localhost:50051
 Monitoring Server Started
 ```
@@ -741,7 +732,7 @@ The important addresses are:
 
 ```text
 Agent gRPC: localhost:50051
-Dashboard WebSocket: ws://localhost:8081
+Dashboard SSE: http://localhost:8081/events
 ```
 
 Keep this terminal open.
@@ -762,66 +753,32 @@ Options:
 - Use VS Code Live Server
 - Use any simple static file server
 
-The dashboard will connect to the backend through WebSocket.
+The dashboard will connect to the backend through SSE.
 
 ---
 
-### 7.4 Start the Python agent on Windows PowerShell
+### 7.4 Start the Python agent
 
-Open a second terminal.
+The agent uses [uv](https://docs.astral.sh/uv/) to manage its virtual
+environment and dependencies, so the steps are the same on Windows, Linux,
+and macOS. Make sure `uv` is installed first.
 
-Go into the agent folder:
+Open a second terminal and go into the agent folder:
 
-```powershell
+```bash
 cd ClientAgent
 ```
 
-Create a virtual environment:
+Install dependencies (uv creates and manages the virtual environment automatically):
 
-```powershell
-python -m venv venv
-```
-
-Activate it:
-
-```powershell
-.\venv\Scripts\Activate.ps1
-```
-
-If PowerShell shows this error:
-
-```text
-running scripts is disabled on this system
-```
-
-run:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-```
-
-Then activate again:
-
-```powershell
-.\venv\Scripts\Activate.ps1
-```
-
-When activation works, the terminal usually starts with:
-
-```text
-(venv)
-```
-
-Install dependencies:
-
-```powershell
-pip install -r requirements.txt
+```bash
+uv sync
 ```
 
 Run the agent:
 
-```powershell
-python agent.py
+```bash
+uv run agent.py
 ```
 
 Expected output:
@@ -831,18 +788,6 @@ Expected output:
 [+] Connected
 [>] Sent metrics: {'hostname': 'DESKTOP-123', ...}
 [<] Server: Metrics received (OK)
-```
-
----
-
-### 7.5 Start the Python agent on Linux/macOS
-
-```bash
-cd ClientAgent
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python3 agent.py
 ```
 
 ---
@@ -863,12 +808,12 @@ By default, both frontend and agent use:
 
 ```text
 Agent: localhost:50051
-Frontend: ws://localhost:8081
+Frontend: http://localhost:8081/events
 ```
 
 This works only when everything runs on the same machine.
 
-If the backend runs on another computer, update the gRPC agent address and the frontend WebSocket address.
+If the backend runs on another computer, update the gRPC agent address and the frontend SSE address.
 
 ### Update the Python agent
 
@@ -885,13 +830,13 @@ Replace `192.168.1.100` with the backend machine's IP address.
 In `frontend/script.js`, change:
 
 ```javascript
-const socket = new WebSocket("ws://localhost:8081");
+const eventSource = new EventSource("http://localhost:8081/events");
 ```
 
 to something like:
 
 ```javascript
-const socket = new WebSocket("ws://192.168.1.100:8081");
+const eventSource = new EventSource("http://192.168.1.100:8081/events");
 ```
 
 ### Firewall
@@ -906,7 +851,7 @@ Tests are located in:
 
 ```text
 src/grpc.test.ts
-src/websocket.test.ts
+src/sse.test.ts
 ```
 
 Run tests with:
@@ -915,16 +860,15 @@ Run tests with:
 npm test
 ```
 
-The tests start a gRPC server on port `50052` and a WebSocket server on port `8090`, separate from the normal application ports `50051` and `8081`.
+The tests start a gRPC server on port `50052` and an SSE server on port `8090`, separate from the normal application ports `50051` and `8081`.
 
 Test coverage includes:
 
 | Test                                       | Purpose                                |
 | ------------------------------------------ | -------------------------------------- |
 | Agent can submit metrics over gRPC         | Checks `SubmitMetrics` acknowledgement |
-| Client can connect                         | Checks basic WebSocket connection      |
-| Frontend receives initial metrics          | Checks `frontend_register` behavior    |
-| Invalid JSON returns error                 | Checks error handling                  |
+| Client can connect                         | Checks the SSE endpoint responds       |
+| Frontend receives initial metrics          | Checks the `initial_metrics` event     |
 | Frontend receives metrics update broadcast | Checks live broadcasting               |
 
 Important note: the tests use the same SQLite database file. Test server names such as `grpc-test-agent` and `broadcast-test` may be written into `data/monitoring.db`.
@@ -940,13 +884,14 @@ Important note: the tests use the same SQLite database file. Test server names s
 | `@grpc/grpc-js`         | Runtime     | gRPC server implementation for Node.js                   |
 | `@grpc/proto-loader`    | Runtime     | Loads the `.proto` file at runtime                       |
 | `better-sqlite3`        | Runtime     | SQLite database access                                   |
-| `ws`                    | Runtime     | WebSocket server and client                              |
 | `dotenv`                | Runtime     | Listed dependency; not actively used in the current code |
 | `typescript`            | Development | TypeScript compiler                                      |
 | `tsx`                   | Development | Run TypeScript directly during development               |
 | `@types/node`           | Development | Node.js type definitions                                 |
-| `@types/ws`             | Development | Type definitions for `ws`                                |
 | `@types/better-sqlite3` | Development | Type definitions for `better-sqlite3`                    |
+
+The SSE server is built on the Node.js built-in `node:http` module, so no
+extra WebSocket dependency is required.
 
 ### Frontend dependencies
 
@@ -954,25 +899,25 @@ The frontend has no external dependencies.
 
 It uses browser-native APIs:
 
-| API              | Purpose                                    |
-| ---------------- | ------------------------------------------ |
-| WebSocket API    | Live connection to backend                 |
-| Canvas API       | Drawing CPU and RAM charts                 |
-| localStorage API | Caching selected server and recent metrics |
+| API                | Purpose                                    |
+| ------------------ | ------------------------------------------ |
+| EventSource (SSE)  | Live connection to backend                 |
+| Canvas API         | Drawing CPU and RAM charts                 |
+| localStorage API   | Caching selected server and recent metrics |
 
 ### Python agent dependencies
 
 Defined in:
 
 ```text
-ClientAgent/requirements.txt
+ClientAgent/pyproject.toml
 ```
 
 | Package      | Purpose                       |
 | ------------ | ----------------------------- |
 | `psutil`     | Read CPU, RAM, and disk usage |
 | `grpcio`     | gRPC client connection        |
-| `grpcio-tools` | gRPC/protobuf tooling       |
+| `grpcio-tools` | gRPC/protobuf tooling (used to generate the `_pb2` stubs) |
 
 ---
 
@@ -983,7 +928,7 @@ ClientAgent/requirements.txt
 - No REST API endpoints are implemented.
 - No login, authentication, or role-based authorization is implemented.
 - No notification system is implemented.
-- The gRPC agent address and WebSocket dashboard URL are hardcoded.
+- The gRPC agent address and SSE dashboard URL are hardcoded.
 - SQLite is used as a local database and is not intended for large-scale production monitoring.
 - The frontend is static and does not have a build or deployment pipeline.
 - The backend does not provide a separate HTTP API for historical data queries.
@@ -1007,6 +952,6 @@ ClientAgent/requirements.txt
 | Team member       | Responsibility                                             |
 | ----------------- | ---------------------------------------------------------- |
 | Masir Ahmad       | Backend development database agent implementation and lead |
-| Vodopianova Alena | WebSocket communication                                    |
+| Vodopianova Alena | Real-time dashboard communication (SSE)                    |
 | Arjmand Helma     | Frontend page                                              |
 | Derman Rifat      | Python monitoring script and documentation                 |

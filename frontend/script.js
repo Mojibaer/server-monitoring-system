@@ -1,5 +1,5 @@
 
-const socket = new WebSocket('ws://localhost:8081');
+const eventSource = new EventSource('http://localhost:8081/events');
 
 const serverSelect =
     document.getElementById('serverSelect');
@@ -650,14 +650,7 @@ function updateInfo(metric, stale = false) {
         `status ${statusValue.toLowerCase()}`;
 }
 
-socket.onopen = () => {
-
-    socket.send(JSON.stringify({
-        type: "frontend_register"
-    }));
-};
-
-socket.onmessage = (event) => {
+eventSource.onmessage = (event) => {
 
     const data =
         JSON.parse(event.data);
