@@ -4,42 +4,78 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Server Monitoring System</title>
+    <title>Server Monitoring Console</title>
     <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
-    <div class="container">
-        <h1>Server Monitoring Dashboard</h1>
+    <main class="container">
+        <header class="dashboard-header">
+            <div>
+                <p class="eyebrow">Live Infrastructure Panel</p>
+                <h1>Server Monitoring Console</h1>
+                <p class="header-text">
+                    Follow CPU, RAM, disk usage and system health from one clean monitoring screen.
+                </p>
+            </div>
 
-        <div class="server-selection">
-            <label for="serverSelect">Choose Server:</label>
-            <select id="serverSelect">
-                <option value="">Select a server...</option>
-            </select>
-            <span id="serverIp"></span>
-        </div>
+            <div class="live-card" aria-label="Live update status">
+                <span class="pulse-dot"></span>
+                <span>Live SSE Feed</span>
+            </div>
+        </header>
 
-        <div class="charts-container">
-            <div class="chart-box">
+        <section class="server-selection" aria-label="Server selection">
+            <div class="field-group">
+                <label for="serverSelect">Active Server</label>
+                <select id="serverSelect">
+                    <option value="">Select a server...</option>
+                </select>
+            </div>
+
+            <span id="serverIp" class="server-ip">Waiting for server data</span>
+        </section>
+
+        <section class="charts-container" aria-label="Resource charts">
+            <article class="chart-box">
+                <div class="chart-header">
+                    <div>
+                        <p class="chart-kicker">Processor</p>
+                        <h2>CPU Usage</h2>
+                    </div>
+                    <span>Last 20 points</span>
+                </div>
+
                 <canvas id="cpuChart"></canvas>
-            </div>
-            <div class="chart-box">
+            </article>
+
+            <article class="chart-box">
+                <div class="chart-header">
+                    <div>
+                        <p class="chart-kicker">Memory</p>
+                        <h2>RAM Usage</h2>
+                    </div>
+                    <span>Last 20 points</span>
+                </div>
+
                 <canvas id="ramChart"></canvas>
+            </article>
+        </section>
+
+        <section class="status-container" aria-label="Server status information">
+            <div class="status-card">
+                <p>Storage</p>
+                <div id="diskUsage">Disk Usage: Selecting...</div>
             </div>
-        </div>
 
-        <div class="status-container">
-            <div id="diskUsage">Disk Usage: Selecting...</div>
-            <div id="serverStatus" class="status ok">
-                STATUS: OK
+            <div class="status-card status-summary">
+                <p>Health Status</p>
+                <div id="serverStatus" class="status ok">
+                    STATUS: OK
+                </div>
             </div>
-        </div>
-
-
-
-
-    </div>
+        </section>
+    </main>
 
     <script src="script.js"></script>
 </body>

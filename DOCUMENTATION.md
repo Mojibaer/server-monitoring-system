@@ -379,157 +379,27 @@ browser never sends messages back. Because of that there is no client
 registration step and no keepalive ping/pong — the browser's `EventSource`
 reconnects automatically if the stream drops.
 
-#### Module-level state
+#### Connection handling
 
-Two module-level variables hold the server's runtime state:
+When a dashboard opens the `/events` endpoint, the backend:
 
-| Variable          | Type                  | Purpose                                              |
-| ----------------- | --------------------- | ---------------------------------------------------- |
-| `frontendClients` | `Set<ServerResponse>` | Tracks every open SSE response object                |
-| `httpServer`      | `Server \| undefined` | Reference to the `node:http` server for shutdown use |
+1. Responds with the SSE headers (`Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`).
+2. Adds the open response to the frontend client set.
+3. Reads the latest 20 metrics per server from SQLite.
+4. Calculates the status for each metric row.
+5. Immediately sends the data as an `initial_metrics` event.
 
-The `frontendClients` set is the core of the broadcast mechanism. Every time
-a client connects, its `ServerResponse` is added to the set. Every time a
-client disconnects, it is removed. Broadcasting means iterating the whole set
-and writing the same frame to each response.
+When the request closes, the connection is removed from the client set.
 
-#### CORS headers
-
-All responses include:
+Each event is written to the stream as a single SSE frame:
 
 ```text
-Access-Control-Allow-Origin: *
+data: <json>\n\n
 ```
 
-This is required because the frontend is opened as a local file (`file://`)
-or served on a different origin than the SSE port `8081`, so the browser
-would otherwise block the `EventSource` connection.
+#### Initial event: `initial_metrics`
 
-#### Exported functions
-
-The file exports three functions used by the rest of the backend:
-
----
-
-##### `startSseServer(port: number)`
-
-Creates the `node:http` server and starts listening on the given port.
-
-The server routes requests as follows:
-
-| URL path        | Action                     |
-| --------------- | -------------------------- |
-| `/events`       | Call `handleSseConnection` |
-| Everything else | Respond with `404`         |
-
-Called from `src/server.ts` during application startup:
-
-```typescript
-startSseServer(8081);
-```
-
-Expected console output:
-
-```text
-SSE server started on http://localhost:8081/events
-```
-
----
-
-##### `shutdownSseServer(): Promise<void>`
-
-Closes every open client connection and then shuts down the HTTP server.
-Returns a `Promise` that resolves once the server is fully closed.
-
-Shutdown sequence:
-
-1. Call `.end()` on every `ServerResponse` in `frontendClients`.
-2. Clear the `frontendClients` set.
-3. Call `httpServer.close()` and wait for its callback.
-4. Set `httpServer` to `undefined`.
-
-Called from `src/server.ts` when the process receives `SIGINT` or `SIGTERM`.
-
----
-
-##### `broadcastToFrontends(data: object)`
-
-Sends the same event to every currently connected dashboard client.
-
-```typescript
-export function broadcastToFrontends(data: object) {
-  for (const client of frontendClients) {
-    sendEvent(client, data);
-  }
-}
-```
-
-Logs how many clients received the update:
-
-```text
-[BROADCAST] Sent update to 2 frontend clients
-```
-
-Called from `src/grpc.ts` after new agent metrics are stored in the database.
-
----
-
-#### Internal functions
-
-##### `handleSseConnection(req, res)`
-
-Handles a new dashboard connection to `/events`.
-
-Steps:
-
-1. Writes the SSE response headers:
-
-```text
-HTTP/1.1 200 OK
-Access-Control-Allow-Origin: *
-Content-Type: text/event-stream
-Cache-Control: no-cache
-Connection: keep-alive
-```
-
-2. Adds the `res` object to `frontendClients`.
-3. Logs the connection with the current client count:
-
-```text
-[FRONTEND] Frontend client connected (1 total)
-```
-
-4. Calls `getInitialMetrics()` from `src/monitoring.ts` and immediately sends
-   the result as an `initial_metrics` event.
-5. Registers a `close` listener on `req`. When the browser tab closes or the
-   connection drops, the listener removes `res` from `frontendClients` and
-   logs:
-
-```text
-[DISCONNECTED] Frontend client disconnected
-```
-
----
-
-##### `sendEvent(res, data)`
-
-Serialises `data` to JSON and writes a single SSE frame to the response:
-
-```typescript
-res.write(`data: ${JSON.stringify(data)}\n\n`);
-```
-
-The double newline `\n\n` is the SSE frame delimiter. The browser's
-`EventSource` splits on it and fires an `onmessage` event for each frame.
-
----
-
-#### SSE event reference
-
-##### `initial_metrics`
-
-Sent automatically as soon as the dashboard connects. The payload is an array
-— one entry per server — each containing its 20 most recent metrics.
+Sent automatically as soon as the dashboard connects.
 
 ```json
 {
@@ -1031,11 +901,11 @@ The frontend has no external dependencies.
 
 It uses browser-native APIs:
 
-| API               | Purpose                                    |
-| ----------------- | ------------------------------------------ |
-| EventSource (SSE) | Live connection to backend                 |
-| Canvas API        | Drawing CPU and RAM charts                 |
-| localStorage API  | Caching selected server and recent metrics |
+| API                | Purpose                                    |
+| ------------------ | ------------------------------------------ |
+| EventSource (SSE)  | Live connection to backend                 |
+| Canvas API         | Drawing CPU and RAM charts                 |
+| localStorage API   | Caching selected server and recent metrics |
 
 ### Python agent dependencies
 
@@ -1045,10 +915,10 @@ Defined in:
 ClientAgent/pyproject.toml
 ```
 
-| Package        | Purpose                                                   |
-| -------------- | --------------------------------------------------------- |
-| `psutil`       | Read CPU, RAM, and disk usage                             |
-| `grpcio`       | gRPC client connection                                    |
+| Package      | Purpose                       |
+| ------------ | ----------------------------- |
+| `psutil`     | Read CPU, RAM, and disk usage |
+| `grpcio`     | gRPC client connection        |
 | `grpcio-tools` | gRPC/protobuf tooling (used to generate the `_pb2` stubs) |
 
 ---
