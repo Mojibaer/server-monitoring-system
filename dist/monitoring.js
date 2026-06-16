@@ -21,34 +21,31 @@ function validateAgentMetrics(metrics) {
     }
     return null;
 }
-function getInitialMetrics() {
-    const metrics = db_1.db.prepare(`
-    SELECT
-      hostname,
-      ipAddress,
-      cpuUsage,
-      ramUsage,
-      diskUsage,
-      timestamp
-    FROM (
-      SELECT
-        servers.hostname,
-        servers.ip_address AS ipAddress,
-        metrics.cpu_usage AS cpuUsage,
-        metrics.ram_usage AS ramUsage,
-        metrics.disk_usage AS diskUsage,
-        metrics.created_at AS timestamp,
-        ROW_NUMBER() OVER (
-          PARTITION BY servers.id
-          ORDER BY metrics.created_at DESC
-        ) AS rowNumber
-      FROM metrics
-      JOIN servers
-        ON metrics.server_id = servers.id
-    )
-    WHERE rowNumber <= 20
-    ORDER BY hostname ASC, timestamp ASC
-  `).all();
+async function getInitialMetrics() {
+    const rows = await (0, db_1.getMetricsWithServers)();
+    const countsByServer = new Map();
+    const metrics = [];
+    for (const row of rows) {
+        const currentCount = countsByServer.get(row.server_id) ?? 0;
+        if (currentCount >= 20 || !row.servers) {
+            continue;
+        }
+        countsByServer.set(row.server_id, currentCount + 1);
+        metrics.push({
+            hostname: row.servers.hostname,
+            ipAddress: row.servers.ip_address,
+            cpuUsage: row.cpu_usage,
+            ramUsage: row.ram_usage,
+            diskUsage: row.disk_usage,
+            timestamp: row.created_at
+        });
+    }
+    metrics.sort((a, b) => {
+        if (a.hostname !== b.hostname) {
+            return a.hostname.localeCompare(b.hostname);
+        }
+        return a.timestamp.localeCompare(b.timestamp);
+    });
     return metrics.map((metric) => ({
         ...metric,
         status: (0, metrics_1.calculateStatus)({
@@ -59,30 +56,15 @@ function getInitialMetrics() {
         })
     }));
 }
-function storeAgentMetrics(metrics) {
+async function storeAgentMetrics(metrics) {
     const validationError = validateAgentMetrics(metrics);
     if (validationError) {
         throw new Error(validationError);
     }
     const { hostname, ipAddress, cpuUsage, ramUsage, diskUsage } = metrics;
     const now = new Date().toISOString();
-    db_1.db.prepare(`
-    INSERT INTO servers (hostname, ip_address, last_seen)
-    VALUES (?, ?, ?)
-    ON CONFLICT(hostname) DO UPDATE SET
-      ip_address = excluded.ip_address,
-      last_seen = excluded.last_seen
-  `).run(hostname, ipAddress ?? null, now);
-    const server = db_1.db
-        .prepare(`SELECT id FROM servers WHERE hostname = ?`)
-        .get(hostname);
-    if (!server) {
-        throw new Error("Failed to register server in database");
-    }
-    db_1.db.prepare(`
-    INSERT INTO metrics (server_id, cpu_usage, ram_usage, disk_usage, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(server.id, cpuUsage, ramUsage, diskUsage, now);
+    const server = await (0, db_1.upsertServer)(hostname, ipAddress ?? null, now);
+    await (0, db_1.insertMetric)(server.id, cpuUsage, ramUsage, diskUsage, now);
     const status = (0, metrics_1.calculateStatus)(metrics);
     return {
         hostname,

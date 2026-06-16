@@ -30,7 +30,7 @@ GRANT ALL ON public.metrics TO anon, authenticated, service_role;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
 
 -- ─────────────────────────────────────────────
--- Seed data exported from SQLite
+-- Seed data
 -- ─────────────────────────────────────────────
 
 INSERT INTO public.servers (id, hostname, ip_address, last_seen) VALUES

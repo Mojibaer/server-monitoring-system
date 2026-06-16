@@ -8,19 +8,27 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*"
 };
 
-export function startSseServer(port: number) {
-  httpServer = createServer((req, res) => {
-    if (req.url === "/events") {
-      handleSseConnection(req, res);
-      return;
-    }
+export function startSseServer(port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    httpServer = createServer((req, res) => {
+      if (req.url === "/events") {
+        handleSseConnection(req, res);
+        return;
+      }
 
-    res.writeHead(404, corsHeaders);
-    res.end();
-  });
+      res.writeHead(404, corsHeaders);
+      res.end();
+    });
 
-  httpServer.listen(port, () => {
-    console.log(`SSE server started on http://localhost:${port}/events`);
+    httpServer.once("error", (error) => {
+      httpServer = undefined;
+      reject(error);
+    });
+
+    httpServer.listen(port, () => {
+      console.log(`SSE server started on http://localhost:${port}/events`);
+      resolve();
+    });
   });
 }
 
@@ -54,10 +62,21 @@ function handleSseConnection(req: IncomingMessage, res: ServerResponse) {
   frontendClients.add(res);
   console.log(`[FRONTEND] Frontend client connected (${frontendClients.size} total)`);
 
-  sendEvent(res, {
-    type: "initial_metrics",
-    payload: getInitialMetrics()
-  });
+  getInitialMetrics()
+    .then((payload) => {
+      sendEvent(res, {
+        type: "initial_metrics",
+        payload
+      });
+    })
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : "Failed to load initial metrics";
+
+      sendEvent(res, {
+        type: "error",
+        payload: { message }
+      });
+    });
 
   req.on("close", () => {
     frontendClients.delete(res);

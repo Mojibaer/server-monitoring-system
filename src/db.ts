@@ -1,50 +1,191 @@
-import Database from "better-sqlite3";
+import path from "node:path";
+import dotenv from "dotenv";
+import { ensureMonitoringSchema } from "./supabase";
 
-export const db = new Database("data/monitoring.db");
+dotenv.config({ quiet: true });
+dotenv.config({ path: path.join(process.cwd(), "supabase", ".env"), override: false, quiet: true });
 
-export function initDatabase(){
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS servers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        hostname TEXT NOT NULL UNIQUE,
-        ip_address TEXT,
-        last_seen TEXT
-        );
+const supabaseUrl = process.env.SUPABASE_PUBLIC_URL ?? "http://localhost:8000";
+const configuredServiceRoleKey = process.env.SERVICE_ROLE_KEY;
 
-        CREATE TABLE IF NOT EXISTS metrics(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        server_id INTEGER NOT NULL,
-        cpu_usage REAL NOT NULL,
-        ram_usage REAL NOT NULL,
-        disk_usage REAL NOT NULL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (server_id) REFERENCES servers(id)
-        );
-    `);
+if (!configuredServiceRoleKey) {
+  throw new Error("SERVICE_ROLE_KEY is missing. Add it to supabase/.env or the root .env file.");
 }
 
-export function seedDatabase() {
-  const insertServer = db.prepare(`
-    INSERT OR IGNORE INTO servers (hostname, ip_address, last_seen)
-    VALUES (?, ?, datetime('now'))
-  `);
+const serviceRoleKey: string = configuredServiceRoleKey;
 
-  insertServer.run("linux-server-01", "192.168.1.50");
-  insertServer.run("linux-server-02", "192.168.1.51");
-
-  const getServer = db.prepare(`
-    SELECT id FROM servers WHERE hostname = ?
-  `);
-
-  const insertMetric = db.prepare(`
-    INSERT INTO metrics (server_id, cpu_usage, ram_usage, disk_usage)
-    VALUES (?, ?, ?, ?)
-  `);
-
-  const server1 = getServer.get("linux-server-01") as { id: number };
-  const server2 = getServer.get("linux-server-02") as { id: number };
-
-  insertMetric.run(server1.id, 35.5, 62.1, 70.3);
-  insertMetric.run(server1.id, 42.8, 65.4, 71.0);
-  insertMetric.run(server2.id, 55.2, 73.6, 81.4);
+export interface ServerRow {
+  id: number;
+  hostname: string;
+  ip_address: string | null;
+  last_seen: string | null;
 }
+
+export interface MetricRow {
+  id: number;
+  server_id: number;
+  cpu_usage: number;
+  ram_usage: number;
+  disk_usage: number;
+  created_at: string;
+  servers?: {
+    hostname: string;
+    ip_address: string | null;
+  };
+}
+
+const restUrl = `${supabaseUrl.replace(/\/$/, "")}/rest/v1`;
+
+function headers(extra?: HeadersInit): HeadersInit {
+  return {
+    apikey: serviceRoleKey,
+    Authorization: `Bearer ${serviceRoleKey}`,
+    "Content-Type": "application/json",
+    ...extra
+  };
+}
+
+async function request<T>(resource: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${restUrl}${resource}`, {
+    ...init,
+    headers: headers(init?.headers)
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Supabase request failed (${response.status}): ${body}`);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json() as Promise<T>;
+}
+
+export async function initDatabase() {
+  try {
+    await checkMonitoringTables();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+
+    if (!message.includes("servers") && !message.includes("metrics")) {
+      throw error;
+    }
+
+    console.log("Monitoring tables are missing. Creating Supabase schema...");
+    ensureMonitoringSchema();
+    await waitForMonitoringTables();
+  }
+}
+
+async function checkMonitoringTables() {
+  await request<ServerRow[]>("/servers?select=id&limit=1");
+  await request<MetricRow[]>("/metrics?select=id&limit=1");
+}
+
+async function waitForMonitoringTables() {
+  const attempts = 15;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      await checkMonitoringTables();
+      return;
+    } catch (error) {
+      if (attempt === attempts) {
+        throw error;
+      }
+
+      await sleep(1_000);
+    }
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function seedDatabase() {
+  const now = new Date().toISOString();
+
+  await deleteRows("/metrics?id=not.is.null");
+  await deleteRows("/servers?id=not.is.null");
+
+  const linuxServer1 = await upsertServer("linux-server-01", "192.168.1.50", now);
+  const linuxServer2 = await upsertServer("linux-server-02", "192.168.1.51", now);
+
+  await insertMetric(linuxServer1.id, 35.5, 62.1, 70.3);
+  await insertMetric(linuxServer1.id, 42.8, 65.4, 71.0);
+  await insertMetric(linuxServer2.id, 55.2, 73.6, 81.4);
+}
+
+export async function getMetricsWithServers(limit = 500) {
+  const query = [
+    "select=id,server_id,cpu_usage,ram_usage,disk_usage,created_at,servers(hostname,ip_address)",
+    "order=created_at.desc",
+    `limit=${limit}`
+  ].join("&");
+
+  return request<MetricRow[]>(`/metrics?${query}`);
+}
+
+async function deleteRows(resource: string) {
+  await request<void>(resource, {
+    method: "DELETE",
+    headers: {
+      Prefer: "return=minimal"
+    }
+  });
+}
+
+export async function upsertServer(hostname: string, ipAddress: string | null, lastSeen: string) {
+  const rows = await request<ServerRow[]>("/servers?on_conflict=hostname", {
+    method: "POST",
+    headers: {
+      Prefer: "resolution=merge-duplicates,return=representation"
+    },
+    body: JSON.stringify({
+      hostname,
+      ip_address: ipAddress,
+      last_seen: lastSeen
+    })
+  });
+
+  const server = rows[0];
+
+  if (!server) {
+    throw new Error("Failed to register server in Supabase");
+  }
+
+  return server;
+}
+
+export async function insertMetric(
+  serverId: number,
+  cpuUsage: number,
+  ramUsage: number,
+  diskUsage: number,
+  createdAt = new Date().toISOString()
+) {
+  const rows = await request<MetricRow[]>("/metrics", {
+    method: "POST",
+    headers: {
+      Prefer: "return=representation"
+    },
+    body: JSON.stringify({
+      server_id: serverId,
+      cpu_usage: cpuUsage,
+      ram_usage: ramUsage,
+      disk_usage: diskUsage,
+      created_at: createdAt
+    })
+  });
+
+  return rows[0];
+}
+
+export const db = {
+  close() {
+    // Supabase REST uses short-lived HTTP requests, so there is no local connection to close.
+  }
+};

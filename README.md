@@ -12,12 +12,12 @@ The system monitors:
 - Hostname and IP address
 - Server status: `OK`, `WARNING`, `CRITICAL`, or `UNKNOWN`
 
-A Python agent collects the metrics and sends them to a Node.js backend through gRPC. The backend stores the data in SQLite and forwards live updates to the frontend dashboard over Server-Sent Events (SSE).
+A Python agent collects the metrics and sends them to a Node.js backend through gRPC. The backend stores the data in Supabase/PostgreSQL running in Docker and forwards live updates to the frontend dashboard over Server-Sent Events (SSE).
 
 ## Architecture
 
 ```text
-Python Agent  →  gRPC Backend  →  SQLite Database
+Python Agent  →  gRPC Backend  →  Supabase/PostgreSQL
                         ↓
                 SSE Dashboard
 ```
@@ -25,7 +25,7 @@ Python Agent  →  gRPC Backend  →  SQLite Database
 ## Technologies
 
 - **Backend:** Node.js, TypeScript, gRPC, Server-Sent Events (SSE)
-- **Database:** SQLite
+- **Database:** Supabase/PostgreSQL in Docker
 - **Agent:** Python, psutil, grpcio
 - **Frontend:** HTML, CSS, JavaScript
 
@@ -35,14 +35,44 @@ Python Agent  →  gRPC Backend  →  SQLite Database
 ClientAgent/     Python monitoring agent
 src/             TypeScript backend source code
 frontend/        Browser dashboard
-data/            SQLite database
+supabase/        Dockerized Supabase/PostgreSQL stack
 README.md        Project overview
 DOCUMENTATION.md Detailed project documentation
 ```
 
+## Requirements
+
+- Node.js and npm
+- Docker Desktop running locally
+- Python with `uv` for the client agent
+
 ## How to Run
 
-### 1. Start the backend
+### 1. Start Supabase/PostgreSQL
+
+The backend checks Supabase on startup. If the Docker stack is not running, it tries to start it automatically.
+
+You can also start it manually:
+
+```bash
+npm run supabase:up
+```
+
+Check the container status with:
+
+```bash
+npm run supabase:status
+```
+
+Supabase keeps running after the backend is stopped. Pressing `Ctrl+C` in
+`npm run dev` stops only the Node.js backend, not the Docker containers.
+To stop Supabase manually, run:
+
+```bash
+npm run supabase:down
+```
+
+### 2. Start the backend
 
 From the main project folder:
 
@@ -57,7 +87,9 @@ For demo data, you can use:
 npm run dev:seed
 ```
 
-### 2. Open the dashboard
+`npm run dev:seed` resets and reseeds the monitoring tables in Supabase.
+
+### 3. Open the dashboard
 
 Open this file in your browser:
 
@@ -67,7 +99,7 @@ frontend/index.html
 
 You can also use the VS Code Live Server extension.
 
-### 3. Start the Python agent
+### 4. Start the Python agent
 
 Open a second terminal:
 

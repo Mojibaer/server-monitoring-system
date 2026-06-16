@@ -42,7 +42,7 @@ const node_path_1 = __importDefault(require("node:path"));
 const grpc = __importStar(require("@grpc/grpc-js"));
 const protoLoader = __importStar(require("@grpc/proto-loader"));
 const monitoring_1 = require("./monitoring");
-const websocket_1 = require("./websocket");
+const sse_1 = require("./sse");
 let grpcServer;
 const protoPath = node_path_1.default.join(process.cwd(), "proto", "monitoring.proto");
 const packageDefinition = protoLoader.loadSync(protoPath, {
@@ -54,15 +54,20 @@ const packageDefinition = protoLoader.loadSync(protoPath, {
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
 const monitoringPackage = protoDescriptor.monitoring;
 function startGrpcServer(port) {
-    grpcServer = new grpc.Server();
-    grpcServer.addService(monitoringPackage.MonitoringService.service, {
-        SubmitMetrics: submitMetrics
-    });
-    grpcServer.bindAsync(`0.0.0.0:${port}`, grpc.ServerCredentials.createInsecure(), (error, boundPort) => {
-        if (error) {
-            throw error;
-        }
-        console.log(`gRPC server started on localhost:${boundPort}`);
+    return new Promise((resolve, reject) => {
+        grpcServer = new grpc.Server();
+        grpcServer.addService(monitoringPackage.MonitoringService.service, {
+            SubmitMetrics: submitMetrics
+        });
+        grpcServer.bindAsync(`0.0.0.0:${port}`, grpc.ServerCredentials.createInsecure(), (error, boundPort) => {
+            if (error) {
+                grpcServer = undefined;
+                reject(error);
+                return;
+            }
+            console.log(`gRPC server started on localhost:${boundPort}`);
+            resolve();
+        });
     });
 }
 function shutdownGrpcServer() {
@@ -77,16 +82,16 @@ function shutdownGrpcServer() {
         });
     });
 }
-function submitMetrics(call, callback) {
+async function submitMetrics(call, callback) {
     try {
-        const storedMetric = (0, monitoring_1.storeAgentMetrics)({
+        const storedMetric = await (0, monitoring_1.storeAgentMetrics)({
             hostname: call.request.hostname ?? "",
             ipAddress: call.request.ipAddress || undefined,
             cpuUsage: Number(call.request.cpuUsage),
             ramUsage: Number(call.request.ramUsage),
             diskUsage: Number(call.request.diskUsage)
         });
-        (0, websocket_1.broadcastToFrontends)({
+        (0, sse_1.broadcastToFrontends)({
             type: "metrics_update",
             payload: storedMetric
         });

@@ -2,7 +2,7 @@
 
 This document explains the structure, purpose, setup, and internal logic of the Server Monitoring System project.
 
-The project is a lightweight real-time monitoring system. A Python agent runs on a monitored machine and collects CPU, RAM, and disk usage. The agent sends the data to a Node.js/TypeScript backend through gRPC. The backend stores the data in SQLite, calculates a health status, and sends live updates to a browser dashboard through Server-Sent Events (SSE).
+The project is a lightweight real-time monitoring system. A Python agent runs on a monitored machine and collects CPU, RAM, and disk usage. The agent sends the data to a Node.js/TypeScript backend through gRPC. The backend stores the data in Supabase/PostgreSQL running in Docker, calculates a health status, and sends live updates to a browser dashboard through Server-Sent Events (SSE).
 
 ---
 
@@ -71,7 +71,7 @@ The current implementation focuses on gRPC communication from the agent to the b
 | Node.js + TypeScript       |
 | - @grpc/grpc-js            |
 | - node:http (SSE)          |
-| - better-sqlite3           |
+| - Supabase REST/PostgREST  |
 | gRPC port: 50051           |
 | SSE port: 8081             |
 +-------------+-------------+
@@ -79,8 +79,8 @@ The current implementation focuses on gRPC communication from the agent to the b
               | stores data
               v
 +-------------+-------------+
-| SQLite Database            |
-| data/monitoring.db         |
+| Supabase/PostgreSQL        |
+| Docker volume              |
 +-------------+-------------+
               |
               | live updates over SSE
@@ -112,7 +112,7 @@ The system has three main parts:
 6. Every 60 seconds, the agent collects CPU, RAM, and disk usage.
 7. The agent sends these values with the gRPC `SubmitMetrics` method.
 8. The backend validates the incoming values.
-9. The backend creates or updates the related server record in SQLite (if it is first time it adds the entry for the server based on the hostname after that it update the last_seen db column ).
+9. The backend creates or updates the related server record in Supabase/PostgreSQL. If it is the first metric from a hostname, the backend inserts a server row; later metrics update `ip_address` and `last_seen`.
 10. The backend stores the metric row in the `metrics` table.
 11. The backend calculates the current status: `OK`, `WARNING`, or `CRITICAL`.
 12. The backend sends a `MetricsAck` response back to the agent.
@@ -148,11 +148,12 @@ This file starts the backend application.
 
 Main responsibilities:
 
-1. Initialize the SQLite database.
-2. Optionally seed the database with sample data.
-3. Start the SSE dashboard server on port `8081`.
-4. Start the gRPC agent server on port `50051`.
-5. Handle graceful shutdown when the process receives `SIGINT` or `SIGTERM`.
+1. Ensure the Supabase Docker stack is running.
+2. Check that the monitoring tables exist.
+3. Optionally reset and seed the monitoring tables with sample data.
+4. Start the SSE dashboard server on port `8081`.
+5. Start the gRPC agent server on port `50051`.
+6. Handle graceful shutdown when the process receives `SIGINT` or `SIGTERM`.
 
 The backend listens for agent gRPC calls on:
 
@@ -170,10 +171,10 @@ http://localhost:8081/events
 
 ### 4.2 Database: `src/db.ts`
 
-The project uses `better-sqlite3` and stores data in this file:
+The project uses Supabase/PostgreSQL running from the `supabase/` Docker Compose stack. Data persists in the Docker volume:
 
 ```text
-data/monitoring.db
+server-monitoring_db_data
 ```
 
 The database has two main tables:
@@ -185,10 +186,10 @@ The database has two main tables:
 
 | Column       | Type    | Description                             |
 | ------------ | ------- | --------------------------------------- |
-| `id`         | INTEGER | Primary key, auto-increment             |
+| `id`         | SERIAL  | Primary key, auto-increment             |
 | `hostname`   | TEXT    | Unique server or computer name          |
 | `ip_address` | TEXT    | Last known IP address                   |
-| `last_seen`  | TEXT    | Timestamp of the latest received metric |
+| `last_seen`  | TIMESTAMPTZ | Timestamp of the latest received metric |
 
 The `hostname` field is unique. If the same machine sends data again, the backend updates its IP address and `last_seen` timestamp.
 
@@ -196,12 +197,12 @@ The `hostname` field is unique. If the same machine sends data again, the backen
 
 | Column       | Type    | Description                           |
 | ------------ | ------- | ------------------------------------- |
-| `id`         | INTEGER | Primary key, auto-increment           |
+| `id`         | SERIAL  | Primary key, auto-increment           |
 | `server_id`  | INTEGER | Foreign key connected to `servers.id` |
-| `cpu_usage`  | REAL    | CPU usage percentage                  |
-| `ram_usage`  | REAL    | RAM usage percentage                  |
-| `disk_usage` | REAL    | Disk usage percentage                 |
-| `created_at` | TEXT    | Timestamp of the metric row           |
+| `cpu_usage`  | FLOAT   | CPU usage percentage                  |
+| `ram_usage`  | FLOAT   | RAM usage percentage                  |
+| `disk_usage` | FLOAT   | Disk usage percentage                 |
+| `created_at` | TIMESTAMPTZ | Timestamp of the metric row       |
 
 The relationship is:
 
@@ -219,7 +220,7 @@ When the backend is started with this command:
 npm run dev:seed
 ```
 
-sample data is inserted into the database. This is useful for testing the dashboard without starting the Python agent.
+the monitoring tables are reset and sample data is inserted into Supabase. This is useful for testing the dashboard without starting the Python agent.
 
 ---
 
@@ -281,7 +282,7 @@ This file contains reusable backend logic shared by the gRPC server and the SSE 
 Main responsibilities:
 
 1. Validate agent metric values.
-2. Insert or update the server record in SQLite.
+2. Insert or update the server record in Supabase/PostgreSQL.
 3. Insert each metric row in the `metrics` table.
 4. Calculate the status with `calculateStatus()`.
 5. Read the latest 20 metrics per server for the dashboard.
@@ -385,7 +386,7 @@ When a dashboard opens the `/events` endpoint, the backend:
 
 1. Responds with the SSE headers (`Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`).
 2. Adds the open response to the frontend client set.
-3. Reads the latest 20 metrics per server from SQLite.
+3. Reads the latest 20 metrics per server from Supabase/PostgreSQL.
 4. Calculates the status for each metric row.
 5. Immediately sends the data as an `initial_metrics` event.
 
@@ -554,7 +555,7 @@ Purpose:
 - Restore the last selected server after refresh
 - Show cached data immediately before fresh SSE data arrives
 
-The main persistent storage is still SQLite. The frontend cache is only a convenience feature.
+The main persistent storage is Supabase/PostgreSQL. The frontend cache is only a convenience feature.
 
 #### Stale server detection
 
@@ -873,7 +874,7 @@ Test coverage includes:
 | Frontend receives initial metrics          | Checks the `initial_metrics` event     |
 | Frontend receives metrics update broadcast | Checks live broadcasting               |
 
-Important note: the tests use the same SQLite database file. Test server names such as `grpc-test-agent` and `broadcast-test` may be written into `data/monitoring.db`.
+Important note: the tests use the same Supabase/PostgreSQL database. Test server names such as `grpc-test-agent` and `broadcast-test` may be written into the `servers` and `metrics` tables.
 
 ---
 
@@ -885,12 +886,10 @@ Important note: the tests use the same SQLite database file. Test server names s
 | ----------------------- | ----------- | -------------------------------------------------------- |
 | `@grpc/grpc-js`         | Runtime     | gRPC server implementation for Node.js                   |
 | `@grpc/proto-loader`    | Runtime     | Loads the `.proto` file at runtime                       |
-| `better-sqlite3`        | Runtime     | SQLite database access                                   |
 | `dotenv`                | Runtime     | Listed dependency; not actively used in the current code |
 | `typescript`            | Development | TypeScript compiler                                      |
 | `tsx`                   | Development | Run TypeScript directly during development               |
 | `@types/node`           | Development | Node.js type definitions                                 |
-| `@types/better-sqlite3` | Development | Type definitions for `better-sqlite3`                    |
 
 The SSE server is built on the Node.js built-in `node:http` module, so no
 extra WebSocket dependency is required.
@@ -931,7 +930,7 @@ ClientAgent/pyproject.toml
 - No login, authentication, or role-based authorization is implemented.
 - No notification system is implemented.
 - The gRPC agent address and SSE dashboard URL are hardcoded.
-- SQLite is used as a local database and is not intended for large-scale production monitoring.
+- Supabase/PostgreSQL must be running for the backend to store and read metrics.
 - The frontend is static and does not have a build or deployment pipeline.
 - The backend does not provide a separate HTTP API for historical data queries.
 

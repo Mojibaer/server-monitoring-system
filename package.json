@@ -2,11 +2,9 @@
   "dependencies": {
     "@grpc/grpc-js": "^1.13.4",
     "@grpc/proto-loader": "^0.8.0",
-    "better-sqlite3": "^12.9.0",
     "dotenv": "^17.4.2"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.6.0",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
@@ -17,6 +15,10 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "start:seed": "node dist/server.js --seed",
-    "test": "node --import tsx --test src/**/*.test.ts"
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "supabase:up": "docker compose --env-file supabase/.env -f supabase/docker-compose.yml up -d",
+    "supabase:down": "docker compose --env-file supabase/.env -f supabase/docker-compose.yml down",
+    "supabase:status": "docker compose --env-file supabase/.env -f supabase/docker-compose.yml ps",
+    "supabase:logs": "docker compose --env-file supabase/.env -f supabase/docker-compose.yml logs -f"
   }
 }

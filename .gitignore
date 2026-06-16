@@ -3,10 +3,6 @@ ClientAgent/venv
 __pycache__/
 *.pyc
 
-# Database
-data/monitoring.db
-
 # Environment files
 .env
 supabase/.env
-SQLDUMP

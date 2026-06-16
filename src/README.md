@@ -1,6 +1,6 @@
 # Monitoring Server — Backend
 
-A Node.js/TypeScript backend that receives agent metrics over gRPC, stores them in SQLite, and broadcasts live updates to connected frontend clients over Server-Sent Events (SSE).
+A Node.js/TypeScript backend that receives agent metrics over gRPC, stores them in Supabase/PostgreSQL, and broadcasts live updates to connected frontend clients over Server-Sent Events (SSE).
 
 ## Requirements
 
@@ -18,7 +18,7 @@ npm install
 | Command | Description |
 |---|---|
 | `npm run dev` | Start the server with `tsx` (no build needed) |
-| `npm run dev:seed` | Start and seed the database with sample data |
+| `npm run dev:seed` | Start Supabase, reset the monitoring tables, and seed sample data |
 | `npm run build` | Compile TypeScript to `dist/` |
 | `npm start` | Run the compiled output from `dist/` |
 | `npm run start:seed` | Run compiled output and seed the database |
@@ -34,7 +34,7 @@ gRPC server started on localhost:50051
 Monitoring Server Started
 ```
 
-Stop with `Ctrl+C` — the server shuts down gracefully (closes all connections and the database).
+Stop with `Ctrl+C` — the server shuts down gracefully. Supabase data remains in the Docker volume.
 
 ## Configuration
 
@@ -111,27 +111,28 @@ not to the dashboard.
 
 ## Database
 
-SQLite database is stored at `data/monitoring.db` and created automatically on first run.
+The backend stores data in the Supabase/PostgreSQL stack under `supabase/`.
+The database persists in the Docker volume `server-monitoring_db_data`.
 
 **Tables:**
 
 `servers`
 | Column | Type | Description |
 |---|---|---|
-| id | INTEGER | Primary key |
+| id | SERIAL | Primary key |
 | hostname | TEXT | Unique server name |
 | ip_address | TEXT | Last known IP |
-| last_seen | TEXT | ISO timestamp of last metric |
+| last_seen | TIMESTAMPTZ | Timestamp of last metric |
 
 `metrics`
 | Column | Type | Description |
 |---|---|---|
-| id | INTEGER | Primary key |
-| server_id | INTEGER | Foreign key → servers |
-| cpu_usage | REAL | CPU % |
-| ram_usage | REAL | RAM % |
-| disk_usage | REAL | Disk % |
-| created_at | TEXT | ISO timestamp |
+| id | SERIAL | Primary key |
+| server_id | INTEGER | Foreign key -> servers |
+| cpu_usage | FLOAT | CPU % |
+| ram_usage | FLOAT | RAM % |
+| disk_usage | FLOAT | Disk % |
+| created_at | TIMESTAMPTZ | Metric timestamp |
 
 ## Project Structure
 

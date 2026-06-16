@@ -43,6 +43,7 @@ const grpc = __importStar(require("@grpc/grpc-js"));
 const protoLoader = __importStar(require("@grpc/proto-loader"));
 const db_1 = require("./db");
 const grpc_1 = require("./grpc");
+const supabase_1 = require("./supabase");
 const grpcPort = 50052;
 const protoPath = node_path_1.default.join(process.cwd(), "proto", "monitoring.proto");
 const packageDefinition = protoLoader.loadSync(protoPath, {
@@ -53,9 +54,10 @@ const packageDefinition = protoLoader.loadSync(protoPath, {
 });
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
 const monitoringPackage = protoDescriptor.monitoring;
-node_test_1.default.before(() => {
-    (0, db_1.initDatabase)();
-    (0, grpc_1.startGrpcServer)(grpcPort);
+node_test_1.default.before(async () => {
+    await (0, supabase_1.ensureSupabaseRunning)();
+    await (0, db_1.initDatabase)();
+    await (0, grpc_1.startGrpcServer)(grpcPort);
 });
 node_test_1.default.after(async () => {
     await (0, grpc_1.shutdownGrpcServer)();
