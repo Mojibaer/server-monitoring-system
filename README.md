@@ -43,12 +43,14 @@ DOCUMENTATION.md Detailed project documentation
 ## Requirements
 
 - Node.js and npm
-- Docker Desktop running locally
+- Docker (Docker Desktop on Windows/macOS, Docker Engine + Compose plugin on Linux)
 - Python with `uv` for the client agent
 
 ## How to Run
 
 ### 1. Start Supabase/PostgreSQL
+
+**Docker must be installed and running.** Supabase/PostgreSQL runs entirely inside Docker containers. The backend checks whether Supabase is reachable on startup and, if not, starts the Docker Compose stack automatically. Use Docker Desktop on Windows/macOS or Docker Engine + Compose plugin on Linux.
 
 The backend checks Supabase on startup. If the Docker stack is not running, it tries to start it automatically.
 

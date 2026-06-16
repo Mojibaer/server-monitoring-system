@@ -6,6 +6,7 @@ A Node.js/TypeScript backend that receives agent metrics over gRPC, stores them 
 
 - Node.js 18+
 - npm
+- Docker (Docker Desktop on Windows/macOS; Docker Engine + Compose plugin on Linux)
 
 ## Setup
 

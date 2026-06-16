@@ -682,6 +682,9 @@ Install these first:
 
 - Node.js 18 or newer
 - npm
+- Docker (required — Supabase/PostgreSQL runs inside Docker containers)
+  - Windows / macOS: install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+  - Linux: install Docker Engine and the Compose plugin (`sudo apt install docker.io docker-compose-plugin` on Debian/Ubuntu; add your user to the `docker` group with `sudo usermod -aG docker $USER` then log out and back in)
 - Python 3.9 or newer
 - VS Code is optional but recommended
 
@@ -690,6 +693,7 @@ Check versions:
 ```bash
 node -v
 npm -v
+docker --version
 python --version
 ```
 
@@ -702,6 +706,8 @@ py --version
 ---
 
 ### 7.2 Start the backend
+
+**Docker must be running before this step.** The backend checks whether Supabase is reachable on startup and, if not, starts the Docker Compose stack in `supabase/` automatically. Docker must be installed and the Docker daemon must be active for this to work (Docker Desktop on Windows/macOS, Docker Engine on Linux).
 
 Open a terminal in the main project folder, where `package.json` exists.
 
@@ -886,7 +892,7 @@ Important note: the tests use the same Supabase/PostgreSQL database. Test server
 | ----------------------- | ----------- | -------------------------------------------------------- |
 | `@grpc/grpc-js`         | Runtime     | gRPC server implementation for Node.js                   |
 | `@grpc/proto-loader`    | Runtime     | Loads the `.proto` file at runtime                       |
-| `dotenv`                | Runtime     | Listed dependency; not actively used in the current code |
+| `dotenv`                | Runtime     | Loads environment variables from `supabase/.env` (Supabase URL and service role key) |
 | `typescript`            | Development | TypeScript compiler                                      |
 | `tsx`                   | Development | Run TypeScript directly during development               |
 | `@types/node`           | Development | Node.js type definitions                                 |
@@ -941,7 +947,7 @@ ClientAgent/pyproject.toml
 - Move configuration to `.env` files.
 - Add alert notifications for warning and critical states.
 - Add process monitoring.
-- Add Docker support.
+- Add Docker support for running the full stack (backend + frontend) in containers, not just Supabase.
 - Add better database cleanup or retention rules.
 - Add more unit and integration tests.
 - Add a configuration screen for backend URL and refresh interval.
@@ -950,8 +956,10 @@ ClientAgent/pyproject.toml
 
 ## 12. Team Responsibilities
 
-| Team member  | Responsibility                                                       |
-| ------------ | -------------------------------------------------------------------- |
-| Masir Ahmad  | Backend development database agent implementation and lead           |
-| Hasan Erfani | Real-time dashboard communication (SSE) Frontend page Implementaiton |
-| Derman Rifat | Python monitoring script and documentation Frontend design           |
+| Team member        | Responsibility                                                       |
+| ------------------ | -------------------------------------------------------------------- |
+| Masir Ahmad        | Backend development, database, agent implementation, Supabase integration, Dockerized Supabase stack, and lead |
+| Hasan Erfani       | Real-time dashboard communication (SSE) Frontend page Implementaiton |
+| Derman Rifat       | Python monitoring script and documentation Frontend design           |
+| Helma Arjmand      | -                                                                    |
+| Alena Vodopianova  | -                                                                    |
