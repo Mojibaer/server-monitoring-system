@@ -62,6 +62,13 @@ Add Grafana as an additional, read-only consumer of the database. Specifically:
    reliance on the Grafana volume for the definition. This matches the
    "infrastructure as code / one `docker compose up`" approach of ADR-0001.
 
+6. **Dashboard reachable in the browser over a locally exposed port.** The
+   Grafana service publishes port `3000`, so the dashboard is opened directly at
+   `http://localhost:3000` — no separate build or hosting step. Like the SSE
+   frontend (`:8081`), it is a browser-facing surface served from the Compose
+   stack. The port is published for local use only; the admin login and a
+   non-default password gate access.
+
 ### Proposed shape (for the future implementation)
 
 ```
