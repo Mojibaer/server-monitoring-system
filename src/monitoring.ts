@@ -36,6 +36,8 @@ export function validateAgentMetrics(metrics: AgentMetricsPayload): string | nul
   return null;
 }
 
+const METRICS_PER_SERVER = 20;
+
 export async function getInitialMetrics() {
   const rows = await getMetricsWithServers();
   const countsByServer = new Map<number, number>();

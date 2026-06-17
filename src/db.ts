@@ -1,9 +1,5 @@
-import path from "node:path";
-import dotenv from "dotenv";
 import { ensureMonitoringSchema } from "./supabase";
-
-dotenv.config({ quiet: true });
-dotenv.config({ path: path.join(process.cwd(), "supabase", ".env"), override: false, quiet: true });
+import { sleep } from "./utils";
 
 const supabaseUrl = process.env.SUPABASE_PUBLIC_URL ?? "http://localhost:8000";
 const configuredServiceRoleKey = process.env.SERVICE_ROLE_KEY;
@@ -101,10 +97,6 @@ async function waitForMonitoringTables() {
   }
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export async function seedDatabase() {
   const now = new Date().toISOString();
 
@@ -119,6 +111,7 @@ export async function seedDatabase() {
   await insertMetric(linuxServer2.id, 55.2, 73.6, 81.4);
 }
 
+// 500 gives comfortable headroom for up to ~25 active servers at 20 metrics each.
 export async function getMetricsWithServers(limit = 500) {
   const query = [
     "select=id,server_id,cpu_usage,ram_usage,disk_usage,created_at,servers(hostname,ip_address)",
@@ -184,8 +177,3 @@ export async function insertMetric(
   return rows[0];
 }
 
-export const db = {
-  close() {
-    // Supabase REST uses short-lived HTTP requests, so there is no local connection to close.
-  }
-};

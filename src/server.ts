@@ -1,4 +1,4 @@
-import { db, initDatabase, seedDatabase } from "./db";
+import { initDatabase, seedDatabase } from "./db";
 import { startSseServer, shutdownSseServer } from "./sse";
 import { startGrpcServer, shutdownGrpcServer } from "./grpc";
 import { ensureSupabaseRunning } from "./supabase";
@@ -21,7 +21,6 @@ async function shutdown(signal: string) {
     console.log(`\n[${signal}] Shutting down gracefully...`);
     await shutdownGrpcServer();
     await shutdownSseServer();
-    db.close();
     console.log("Server stopped.");
     process.exit(0);
 }

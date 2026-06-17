@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import dotenv from "dotenv";
+import { sleep } from "./utils";
 
 dotenv.config({ quiet: true });
 dotenv.config({ path: path.join(process.cwd(), "supabase", ".env"), override: false, quiet: true });
@@ -164,6 +165,3 @@ async function isSupabaseApiReady() {
   }
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}

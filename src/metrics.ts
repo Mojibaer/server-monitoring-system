@@ -1,6 +1,6 @@
 import { ServerStatus, AgentMetricsPayload } from "./type";
 
-export function calculateStatus(metrics: AgentMetricsPayload): ServerStatus {
+export function calculateStatus(metrics: Pick<AgentMetricsPayload, "cpuUsage" | "ramUsage" | "diskUsage">): ServerStatus {
     if (
         metrics.cpuUsage >= 90 ||
         metrics.ramUsage >= 90 ||
