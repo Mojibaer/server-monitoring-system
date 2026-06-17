@@ -72,7 +72,6 @@ export async function getInitialMetrics() {
   return metrics.map((metric) => ({
     ...metric,
     status: calculateStatus({
-      hostname: metric.hostname,
       cpuUsage: metric.cpuUsage,
       ramUsage: metric.ramUsage,
       diskUsage: metric.diskUsage

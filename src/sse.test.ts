@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { broadcastToFrontends, startSseServer, shutdownSseServer } from "./sse";
 import { initDatabase } from "./db";
-import { ensureSupabaseRunning } from "./supabase";
+import { waitForSupabase } from "./supabase";
 
 const SSE_URL = "http://localhost:8090/events";
 
@@ -51,7 +51,7 @@ async function waitForEvent(
 }
 
 test.before(async () => {
-  await ensureSupabaseRunning();
+  await waitForSupabase();
   await initDatabase();
   startSseServer(8090);
 });

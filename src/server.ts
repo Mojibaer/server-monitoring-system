@@ -1,10 +1,10 @@
 import { initDatabase, seedDatabase } from "./db";
 import { startSseServer, shutdownSseServer } from "./sse";
 import { startGrpcServer, shutdownGrpcServer } from "./grpc";
-import { ensureSupabaseRunning } from "./supabase";
+import { waitForSupabase } from "./supabase";
 
 async function main() {
-    await ensureSupabaseRunning();
+    await waitForSupabase();
     await initDatabase();
 
     if (process.argv.includes("--seed")) {

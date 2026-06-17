@@ -1,13 +1,16 @@
 import asyncio
-import socket
 import os
-import psutil
+import socket
+import time
+
 import grpc
 
 import monitoring_pb2
 import monitoring_pb2_grpc
+from cgroup_metrics import collect_resource_usage
 
-BACKEND_URL = "localhost:50051"
+BACKEND_URL = os.environ.get("BACKEND_URL", "localhost:50051")
+AGENT_HOSTNAME = os.environ.get("AGENT_HOSTNAME") or socket.gethostname()
 INTERVAL_SECONDS = 60
 RETRY_DELAY = 5
 
@@ -24,18 +27,14 @@ def get_ip_address():
         return None
 
 
-def get_disk_usage():
-    path = "C:\\" if os.name == "nt" else "/"
-    return psutil.disk_usage(path).percent
-
-
 def collect_metrics():
+    cpu_usage, ram_usage, disk_usage = collect_resource_usage()
     return monitoring_pb2.AgentMetrics(
-        hostname=socket.gethostname(),
+        hostname=AGENT_HOSTNAME,
         ip_address=get_ip_address() or "",
-        cpu_usage=psutil.cpu_percent(interval=1),
-        ram_usage=psutil.virtual_memory().percent,
-        disk_usage=get_disk_usage(),
+        cpu_usage=cpu_usage,
+        ram_usage=ram_usage,
+        disk_usage=disk_usage,
     )
 
 
@@ -72,7 +71,7 @@ async def run_agent():
     """Keep the connection alive and reconnect whenever it drops."""
     while True:
         try:
-            print(f"[*] Connecting to {BACKEND_URL}...")
+            print(f"[*] Connecting to {BACKEND_URL} as {AGENT_HOSTNAME}...")
             channel, stub = await connect()
             print("[+] Connected")
 

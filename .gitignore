@@ -1,5 +1,7 @@
 node_modules
+dist
 ClientAgent/venv
+ClientAgent/.venv
 __pycache__/
 *.pyc
 
