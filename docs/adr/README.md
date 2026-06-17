@@ -19,3 +19,4 @@ follows a lightweight [MADR](https://adr.github.io/madr/)-style template:
 | ADR | Title | Status |
 | --- | ----- | ------ |
 | [0001](0001-dockerize-backend-and-agents.md) | Dockerize backend and client agents | accepted |
+| [0002](0002-grafana-integration.md) | Add Grafana for dashboards and historical views | proposed |
