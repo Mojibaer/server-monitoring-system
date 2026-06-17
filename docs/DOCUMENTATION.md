@@ -56,41 +56,36 @@ The current implementation focuses on gRPC communication from the agent to the b
 ## 2. System Architecture
 
 ```text
-+---------------------------+
-| Monitored Machine          |
-| Python Agent               |
-| - psutil                   |
-| - grpcio                   |
-+-------------+-------------+
-              |
-              | SubmitMetrics
-              | gRPC
-              v
-+-------------+-------------+
-| Backend Server             |
-| Node.js + TypeScript       |
-| - @grpc/grpc-js            |
-| - node:http (SSE)          |
-| - Supabase REST/PostgREST  |
-| gRPC port: 50051           |
-| SSE port: 8081             |
-+-------------+-------------+
-              |
-              | stores data
-              v
-+-------------+-------------+
-| Supabase/PostgreSQL        |
-| Docker volume              |
-+-------------+-------------+
-              |
-              | live updates over SSE
-              v
-+-------------+-------------+
-| Browser Dashboard          |
-| HTML + CSS + JavaScript    |
-| Canvas charts              |
-+---------------------------+
++---------------------------+   +---------------------------+
+| Agent container (xN)       |   | Backend container          |
+| Python                     |   | Node.js + TypeScript       |
+| - grpcio                   |   | - @grpc/grpc-js            |
+| - cgroup metrics           |   | - node:http (SSE)          |
+| Own IP + CPU/mem limits    |   | - Supabase REST/PostgREST  |
++-------------+-------------+   | gRPC port: 50051           |
+              |                  | SSE port:  8081            |
+              | SubmitMetrics    +-------------+-------------+
+              | gRPC                            |
+              +-----------------> backend:50051 | stores data via REST
+                                                v
+                                  +-------------+-------------+
+                                  | Supabase (in Docker)       |
+                                  | db + rest (PostgREST)      |
+                                  | + kong gateway (:8000)     |
+                                  +-------------+-------------+
+                                                |
+                          live updates over SSE | :8081
+                                                v
+                                  +-------------+-------------+
+                                  | Browser Dashboard          |
+                                  | HTML + CSS + JavaScript    |
+                                  | (runs outside Docker)      |
+                                  +---------------------------+
 ```
+
+All components except the browser dashboard run as Docker Compose services.
+Agents are separate containers built from one image, individualised through
+environment variables, each with its own IP and CPU/memory limits.
 
 The system has three main parts:
 
@@ -104,12 +99,12 @@ The system has three main parts:
 
 ## 3. Runtime Data Flow
 
-1. The backend is started with `npm run build` and then `npm run start` or directly `npm run dev` but not recommended for the production. If there is no db to seed / populate db, the program must be started as following `npm run build` then `npm run dev:seed` and at last `npm run start`
+1. `docker compose up` starts the database, REST gateway, backend and agents. The backend waits until the Supabase REST API is reachable, then starts its gRPC and SSE servers.
 2. The frontend dashboard opens `frontend/index.html` in the browser.
 3. The frontend connects to the backend SSE endpoint on `http://localhost:8081/events`.
 4. The backend immediately sends the latest stored metrics to the frontend as `initial_metrics`.
-5. The Python agent starts and connects to the gRPC server on `localhost:50051`.
-6. Every 60 seconds, the agent collects CPU, RAM, and disk usage.
+5. Each Python agent container connects to the gRPC server at `backend:50051` (configurable via `BACKEND_URL`).
+6. Every 60 seconds, the agent collects CPU, RAM, and disk usage from the container's cgroup.
 7. The agent sends these values with the gRPC `SubmitMetrics` method.
 8. The backend validates the incoming values.
 9. The backend creates or updates the related server record in Supabase/PostgreSQL. If it is the first metric from a hostname, the backend inserts a server row; later metrics update `ip_address` and `last_seen`.
@@ -148,12 +143,11 @@ This file starts the backend application.
 
 Main responsibilities:
 
-1. Ensure the Supabase Docker stack is running.
-2. Check that the monitoring tables exist.
-3. Optionally reset and seed the monitoring tables with sample data.
-4. Start the SSE dashboard server on port `8081`.
-5. Start the gRPC agent server on port `50051`.
-6. Handle graceful shutdown when the process receives `SIGINT` or `SIGTERM`.
+1. Wait until the Supabase REST API is reachable (`waitForSupabase`).
+2. Wait until the monitoring tables exist (applied via the Postgres init mount).
+3. Start the SSE dashboard server on port `8081`.
+4. Start the gRPC agent server on port `50051`.
+5. Handle graceful shutdown when the process receives `SIGINT` or `SIGTERM`.
 
 The backend listens for agent gRPC calls on:
 
@@ -214,13 +208,14 @@ This means one server can have many metric rows.
 
 #### Seed data
 
-When the backend is started with this command:
+A seeding helper (`seedDatabase`) still exists for local development. When the
+backend is run outside Docker with the `--seed` flag (`node dist/server.js --seed`),
+the monitoring tables are reset and sample data is inserted, which is useful for
+testing the dashboard without an agent.
 
-```bash
-npm run dev:seed
-```
-
-the monitoring tables are reset and sample data is inserted into Supabase. This is useful for testing the dashboard without starting the Python agent.
+In the Docker setup this is not used: the tables start empty and fill up live as
+the agent containers report. The schema itself is created once from the init
+mount (`supabase/volumes/db/schema.sql`), not by the backend.
 
 ---
 
@@ -602,30 +597,37 @@ ClientAgent/agent.py
 
 It is responsible for collecting local machine metrics and sending them to the backend.
 
-Important constants:
+Important constants and environment variables:
 
 ```python
-BACKEND_URL = "localhost:50051"
+BACKEND_URL    = os.environ.get("BACKEND_URL", "localhost:50051")
+AGENT_HOSTNAME = os.environ.get("AGENT_HOSTNAME") or socket.gethostname()
 INTERVAL_SECONDS = 60
 RETRY_DELAY = 5
 ```
 
+`BACKEND_URL` and `AGENT_HOSTNAME` are injected per container by Docker Compose,
+so several agents built from one image report under distinct names and reach the
+backend by its service name.
+
 ### Metric collection
 
-The agent uses `psutil`.
+The agent reads its own resource usage from the container's cgroup filesystem
+(`cgroup_metrics.py`), not host-wide tools. This means each agent reports what
+*its own container* consumes — provided the container has CPU/memory limits set.
+cgroup v2 is used first, with a v1 fallback for older Docker setups.
 
-| Metric     | Code                                         |
-| ---------- | -------------------------------------------- |
-| Hostname   | `socket.gethostname()`                       |
-| IP address | `socket.gethostbyname(socket.gethostname())` |
-| CPU usage  | `psutil.cpu_percent(interval=1)`             |
-| RAM usage  | `psutil.virtual_memory().percent`            |
-| Disk usage | `psutil.disk_usage(path).percent`            |
+| Metric     | Source                                                        |
+| ---------- | ------------------------------------------------------------- |
+| Hostname   | `AGENT_HOSTNAME` env var (falls back to `socket.gethostname()`) |
+| IP address | routing-interface lookup via a dummy socket                   |
+| CPU usage  | cgroup `cpu.stat` usage delta ÷ allowed cores (`cpu.max`)      |
+| RAM usage  | cgroup `memory.current` ÷ `memory.max`                         |
+| Disk usage | `shutil.disk_usage("/")` of the container root filesystem      |
 
-For disk usage, the script checks:
-
-- `C:\` on Windows
-- `/` on Linux/macOS
+> Because cgroup runs inside the (always-Linux) container, the agent works the
+> same on Linux, macOS and Windows hosts. Container CPU/memory limits are what
+> make the percentages meaningful and distinct between agents.
 
 ### Sending metrics
 
@@ -666,191 +668,117 @@ This makes the agent more robust during development.
 
 ## 7. How to Run the Project
 
-The correct order is important:
-
-```text
-1. Start backend
-2. Open frontend dashboard
-3. Start Python agent
-```
+The entire stack (database, backend and agents) runs through Docker Compose.
+Only the browser dashboard runs outside Docker.
 
 ---
 
 ### 7.1 Prerequisites
 
-Install these first:
+The only requirement is **Docker** with the Compose plugin:
 
-- Node.js 18 or newer
-- npm
-- Docker (required — Supabase/PostgreSQL runs inside Docker containers)
-  - Windows / macOS: install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-  - Linux: install Docker Engine and the Compose plugin (`sudo apt install docker.io docker-compose-plugin` on Debian/Ubuntu; add your user to the `docker` group with `sudo usermod -aG docker $USER` then log out and back in)
-- Python 3.9 or newer
-- VS Code is optional but recommended
+- Windows / macOS: install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- Linux: install Docker Engine and the Compose plugin (`sudo apt install docker.io docker-compose-plugin` on Debian/Ubuntu; add your user to the `docker` group with `sudo usermod -aG docker $USER`, then log out and back in)
 
-Check versions:
+Check it works:
 
 ```bash
-node -v
-npm -v
 docker --version
-python --version
+docker compose version
 ```
 
-On Windows, if `python` does not work, try:
+Node.js and Python are **not** required to run the system — the images build and
+run everything. They are only needed for development outside the containers.
+
+---
+
+### 7.2 Create the environment file
+
+The real secrets live in `supabase/.env`, which is gitignored. Create it once
+from the template (the demo keys work locally as-is):
 
 ```bash
-py --version
+cp supabase/.env.example supabase/.env
 ```
 
 ---
 
-### 7.2 Start the backend
+### 7.3 Start the stack
 
-**Docker must be running before this step.** The backend checks whether Supabase is reachable on startup and, if not, starts the Docker Compose stack in `supabase/` automatically. Docker must be installed and the Docker daemon must be active for this to work (Docker Desktop on Windows/macOS, Docker Engine on Linux).
-
-Open a terminal in the main project folder, where `package.json` exists.
-
-Install dependencies:
+From the project root:
 
 ```bash
-npm install
+docker compose --env-file supabase/.env -f supabase/docker-compose.yml up -d --build
 ```
 
-Run backend in development mode:
+This builds the backend and agent images for your local architecture (so it works
+on Intel and Apple Silicon alike) and starts everything in the correct order
+(db → kong → backend → agents).
+
+Check status and watch the backend log:
 
 ```bash
-npm run dev
+docker compose --env-file supabase/.env -f supabase/docker-compose.yml ps
+docker compose --env-file supabase/.env -f supabase/docker-compose.yml logs -f backend
 ```
 
-Or run with sample data:
-
-```bash
-npm run dev:seed
-```
-
-Expected output:
+Expected backend output:
 
 ```text
+Supabase is ready
 SSE server started on http://localhost:8081/events
 gRPC server started on localhost:50051
 Monitoring Server Started
+[AGENT:gRPC] Metrics received from web-server-01 - status: OK
 ```
-
-The important addresses are:
-
-```text
-Agent gRPC: localhost:50051
-Dashboard SSE: http://localhost:8081/events
-```
-
-Keep this terminal open.
 
 ---
 
-### 7.3 Open the frontend
+### 7.4 Open the frontend
 
-Open this file in a browser:
+Open this file in a browser (it runs outside Docker and connects to
+`localhost:8081`):
 
 ```text
 frontend/index.html
 ```
 
-Options:
-
-- Double-click the file
-- Use VS Code Live Server
-- Use any simple static file server
-
-The dashboard will connect to the backend through SSE.
+Options: double-click the file, use VS Code Live Server, or any static file server.
 
 ---
 
-### 7.4 Start the Python agent
-
-The agent uses [uv](https://docs.astral.sh/uv/) to manage its virtual
-environment and dependencies, so the steps are the same on Windows, Linux,
-and macOS. Make sure `uv` is installed first.
-
-Open a second terminal and go into the agent folder:
+### 7.5 Stop the project
 
 ```bash
-cd ClientAgent
+# Stop containers, keep the database data:
+docker compose --env-file supabase/.env -f supabase/docker-compose.yml down
+
+# Stop and wipe the database volume (required for a clean schema re-init):
+docker compose --env-file supabase/.env -f supabase/docker-compose.yml down -v
 ```
 
-Install dependencies (uv creates and manages the virtual environment automatically):
-
-```bash
-uv sync
-```
-
-Run the agent:
-
-```bash
-uv run agent.py
-```
-
-Expected output:
-
-```text
-[*] Connecting to localhost:50051...
-[+] Connected
-[>] Sent metrics: {'hostname': 'DESKTOP-123', ...}
-[<] Server: Metrics received (OK)
-```
+> The schema is applied once, when the data volume is first created. If the
+> tables ever seem missing, run `down -v` and start again.
 
 ---
 
-### 7.6 Stop the project
+## 8. Adding More Agents
 
-To stop the backend or agent, go to the related terminal and press:
+Each agent is a service in `supabase/docker-compose.yml`, all built from
+`ClientAgent/`. To add an agent, copy an existing `agent-*` block and give it:
 
-```text
-Ctrl + C
-```
+- a unique `container_name`
+- a unique `AGENT_HOSTNAME`
+- the `mem_limit` and `cpus` you want it to report against
 
----
+The agents get their IP automatically from the Docker network. Their CPU and RAM
+percentages genuinely differ because each reads its own cgroup against its own
+limits.
 
-## 8. Running from Another Machine
-
-By default, both frontend and agent use:
-
-```text
-Agent: localhost:50051
-Frontend: http://localhost:8081/events
-```
-
-This works only when everything runs on the same machine.
-
-If the backend runs on another computer, update the gRPC agent address and the frontend SSE address.
-
-### Update the Python agent
-
-In `ClientAgent/agent.py`:
-
-```python
-BACKEND_URL = "192.168.1.100:50051"
-```
-
-Replace `192.168.1.100` with the backend machine's IP address.
-
-### Update the frontend
-
-In `frontend/script.js`, change:
-
-```javascript
-const eventSource = new EventSource("http://localhost:8081/events");
-```
-
-to something like:
-
-```javascript
-const eventSource = new EventSource("http://192.168.1.100:8081/events");
-```
-
-### Firewall
-
-The backend machine must allow incoming TCP connections on port `50051` for the agent and port `8081` for the dashboard.
+> **Exposing the backend to non-container agents:** by default the gRPC port
+> `50051` is internal to the Compose network. To let an agent running outside
+> Docker connect, publish the port (add `ports: ["50051:50051"]` to the backend
+> service) and point that agent's `BACKEND_URL` at the host machine's IP.
 
 ---
 
@@ -922,9 +850,12 @@ ClientAgent/pyproject.toml
 
 | Package      | Purpose                       |
 | ------------ | ----------------------------- |
-| `psutil`     | Read CPU, RAM, and disk usage |
 | `grpcio`     | gRPC client connection        |
 | `grpcio-tools` | gRPC/protobuf tooling (used to generate the `_pb2` stubs) |
+
+CPU, RAM and disk usage are read from the container's cgroup filesystem
+(`cgroup_metrics.py`), so no `psutil` dependency is needed. `protobuf` is pulled
+in transitively by `grpcio` and required at runtime by the generated stubs.
 
 ---
 
@@ -932,25 +863,26 @@ ClientAgent/pyproject.toml
 
 ### Current limitations
 
-- No REST API endpoints are implemented.
+- No REST API endpoints are implemented for clients.
 - No login, authentication, or role-based authorization is implemented.
 - No notification system is implemented.
-- The gRPC agent address and SSE dashboard URL are hardcoded.
-- Supabase/PostgreSQL must be running for the backend to store and read metrics.
-- The frontend is static and does not have a build or deployment pipeline.
-- The backend does not provide a separate HTTP API for historical data queries.
+- The frontend's SSE URL (`localhost:8081`) is hardcoded in `frontend/script.js`.
+- The schema is applied only on a fresh database volume; re-initialising requires `down -v`.
+- Disk usage reflects the container root filesystem, not a per-container disk quota.
+- Container metrics are only meaningful when CPU/memory limits are set on the agents.
+- The frontend is static and runs outside Docker; it has no build or deployment pipeline.
 
 ### Possible improvements
 
 - Add authentication with tokens or user login.
 - Add REST endpoints such as `GET /servers` and `GET /metrics`.
-- Move configuration to `.env` files.
+- Make the frontend's backend URL configurable instead of hardcoded.
 - Add alert notifications for warning and critical states.
 - Add process monitoring.
-- Add Docker support for running the full stack (backend + frontend) in containers, not just Supabase.
+- Containerize the frontend (e.g. behind nginx) so the whole system runs in Docker.
+- Add an idempotent schema migration step so re-init doesn't need `down -v`.
 - Add better database cleanup or retention rules.
 - Add more unit and integration tests.
-- Add a configuration screen for backend URL and refresh interval.
 
 ---
 

@@ -8,3 +8,6 @@ __pycache__/
 # Environment files
 .env
 supabase/.env
+
+# Local tooling (not needed in containers)
+.nvmrc
