@@ -2,3 +2,7 @@ node_modules
 ClientAgent/venv
 __pycache__/
 *.pyc
+
+# Environment files
+.env
+supabase/.env

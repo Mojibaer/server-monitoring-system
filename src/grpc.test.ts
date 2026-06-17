@@ -5,6 +5,7 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import { initDatabase } from "./db";
 import { shutdownGrpcServer, startGrpcServer } from "./grpc";
+import { ensureSupabaseRunning } from "./supabase";
 
 const grpcPort = 50052;
 const protoPath = path.join(process.cwd(), "proto", "monitoring.proto");
@@ -19,8 +20,9 @@ const packageDefinition = protoLoader.loadSync(protoPath, {
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition) as any;
 const monitoringPackage = protoDescriptor.monitoring;
 
-test.before(() => {
-  initDatabase();
+test.before(async () => {
+  await ensureSupabaseRunning();
+  await initDatabase();
   startGrpcServer(grpcPort);
 });
 

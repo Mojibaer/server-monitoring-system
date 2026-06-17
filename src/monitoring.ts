@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { getMetricsWithServers, insertMetric, upsertServer } from "./db";
 import { calculateStatus } from "./metrics";
 import { AgentMetricsPayload, ServerStatus } from "./type";
 
@@ -36,36 +36,40 @@ export function validateAgentMetrics(metrics: AgentMetricsPayload): string | nul
   return null;
 }
 
-export function getInitialMetrics() {
-  const metrics = db.prepare(`
-    SELECT
-      hostname,
-      ipAddress,
-      cpuUsage,
-      ramUsage,
-      diskUsage,
-      timestamp
-    FROM (
-      SELECT
-        servers.hostname,
-        servers.ip_address AS ipAddress,
-        metrics.cpu_usage AS cpuUsage,
-        metrics.ram_usage AS ramUsage,
-        metrics.disk_usage AS diskUsage,
-        metrics.created_at AS timestamp,
-        ROW_NUMBER() OVER (
-          PARTITION BY servers.id
-          ORDER BY metrics.created_at DESC
-        ) AS rowNumber
-      FROM metrics
-      JOIN servers
-        ON metrics.server_id = servers.id
-    )
-    WHERE rowNumber <= 20
-    ORDER BY hostname ASC, timestamp ASC
-  `).all();
+const METRICS_PER_SERVER = 20;
 
-  return (metrics as MetricRow[]).map((metric) => ({
+export async function getInitialMetrics() {
+  const rows = await getMetricsWithServers();
+  const countsByServer = new Map<number, number>();
+  const metrics: MetricRow[] = [];
+
+  for (const row of rows) {
+    const currentCount = countsByServer.get(row.server_id) ?? 0;
+
+    if (currentCount >= 20 || !row.servers) {
+      continue;
+    }
+
+    countsByServer.set(row.server_id, currentCount + 1);
+    metrics.push({
+      hostname: row.servers.hostname,
+      ipAddress: row.servers.ip_address,
+      cpuUsage: row.cpu_usage,
+      ramUsage: row.ram_usage,
+      diskUsage: row.disk_usage,
+      timestamp: row.created_at
+    });
+  }
+
+  metrics.sort((a, b) => {
+    if (a.hostname !== b.hostname) {
+      return a.hostname.localeCompare(b.hostname);
+    }
+
+    return a.timestamp.localeCompare(b.timestamp);
+  });
+
+  return metrics.map((metric) => ({
     ...metric,
     status: calculateStatus({
       hostname: metric.hostname,
@@ -76,7 +80,7 @@ export function getInitialMetrics() {
   }));
 }
 
-export function storeAgentMetrics(metrics: AgentMetricsPayload): StoredMetric {
+export async function storeAgentMetrics(metrics: AgentMetricsPayload): Promise<StoredMetric> {
   const validationError = validateAgentMetrics(metrics);
 
   if (validationError) {
@@ -86,26 +90,8 @@ export function storeAgentMetrics(metrics: AgentMetricsPayload): StoredMetric {
   const { hostname, ipAddress, cpuUsage, ramUsage, diskUsage } = metrics;
   const now = new Date().toISOString();
 
-  db.prepare(`
-    INSERT INTO servers (hostname, ip_address, last_seen)
-    VALUES (?, ?, ?)
-    ON CONFLICT(hostname) DO UPDATE SET
-      ip_address = excluded.ip_address,
-      last_seen = excluded.last_seen
-  `).run(hostname, ipAddress ?? null, now);
-
-  const server = db
-    .prepare(`SELECT id FROM servers WHERE hostname = ?`)
-    .get(hostname) as { id: number } | undefined;
-
-  if (!server) {
-    throw new Error("Failed to register server in database");
-  }
-
-  db.prepare(`
-    INSERT INTO metrics (server_id, cpu_usage, ram_usage, disk_usage, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(server.id, cpuUsage, ramUsage, diskUsage, now);
+  const server = await upsertServer(hostname, ipAddress ?? null, now);
+  await insertMetric(server.id, cpuUsage, ramUsage, diskUsage, now);
 
   const status = calculateStatus(metrics);
 

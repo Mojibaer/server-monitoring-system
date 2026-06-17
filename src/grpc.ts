@@ -26,24 +26,29 @@ const packageDefinition = protoLoader.loadSync(protoPath, {
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition) as any;
 const monitoringPackage = protoDescriptor.monitoring;
 
-export function startGrpcServer(port: number) {
-  grpcServer = new grpc.Server();
+export function startGrpcServer(port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    grpcServer = new grpc.Server();
 
-  grpcServer.addService(monitoringPackage.MonitoringService.service, {
-    SubmitMetrics: submitMetrics
-  });
+    grpcServer.addService(monitoringPackage.MonitoringService.service, {
+      SubmitMetrics: submitMetrics
+    });
 
-  grpcServer.bindAsync(
-    `0.0.0.0:${port}`,
-    grpc.ServerCredentials.createInsecure(),
-    (error, boundPort) => {
-      if (error) {
-        throw error;
+    grpcServer.bindAsync(
+      `0.0.0.0:${port}`,
+      grpc.ServerCredentials.createInsecure(),
+      (error, boundPort) => {
+        if (error) {
+          grpcServer = undefined;
+          reject(error);
+          return;
+        }
+
+        console.log(`gRPC server started on localhost:${boundPort}`);
+        resolve();
       }
-
-      console.log(`gRPC server started on localhost:${boundPort}`);
-    }
-  );
+    );
+  });
 }
 
 export function shutdownGrpcServer(): Promise<void> {
@@ -60,12 +65,12 @@ export function shutdownGrpcServer(): Promise<void> {
   });
 }
 
-function submitMetrics(
+async function submitMetrics(
   call: grpc.ServerUnaryCall<AgentMetricsRequest, { status: string; message: string }>,
   callback: grpc.sendUnaryData<{ status: string; message: string }>
 ) {
   try {
-    const storedMetric = storeAgentMetrics({
+    const storedMetric = await storeAgentMetrics({
       hostname: call.request.hostname ?? "",
       ipAddress: call.request.ipAddress || undefined,
       cpuUsage: Number(call.request.cpuUsage),
