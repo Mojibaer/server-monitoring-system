@@ -1,4 +1,3 @@
-import { ensureMonitoringSchema } from "./supabase";
 import { sleep } from "./utils";
 
 const supabaseUrl = process.env.SUPABASE_PUBLIC_URL ?? "http://localhost:8000";
@@ -33,9 +32,10 @@ export interface MetricRow {
 const restUrl = `${supabaseUrl.replace(/\/$/, "")}/rest/v1`;
 
 function headers(extra?: HeadersInit): HeadersInit {
+  // Kong's key-auth rejects requests that carry the key in BOTH the apikey
+  // header and Authorization (duplicate credentials → 401). Send only apikey.
   return {
     apikey: serviceRoleKey,
-    Authorization: `Bearer ${serviceRoleKey}`,
     "Content-Type": "application/json",
     ...extra
   };
@@ -59,20 +59,12 @@ async function request<T>(resource: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+// The schema is applied by the Postgres init mount when the data volume is
+// first created. We only wait for the tables to appear; we never create them
+// here. Missing tables after the wait means the volume was initialised without
+// the schema (run `docker compose down -v` and start fresh).
 export async function initDatabase() {
-  try {
-    await checkMonitoringTables();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-
-    if (!message.includes("servers") && !message.includes("metrics")) {
-      throw error;
-    }
-
-    console.log("Monitoring tables are missing. Creating Supabase schema...");
-    ensureMonitoringSchema();
-    await waitForMonitoringTables();
-  }
+  await waitForMonitoringTables();
 }
 
 async function checkMonitoringTables() {

@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.gitignore
+ClientAgent
+frontend
+supabase
+data
+*.md
+.env
+.nvmrc
+npm-debug.log

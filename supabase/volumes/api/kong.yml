@@ -2,24 +2,6 @@ _format_version: "2.1"
 
 services:
 
-  - name: auth-v1
-    url: http://auth:9999/
-    routes:
-      - name: auth-v1-all
-        strip_path: true
-        paths:
-          - /auth/v1/
-    plugins:
-      - name: cors
-      - name: key-auth
-        config:
-          hide_credentials: false
-      - name: acl
-        config:
-          allow:
-            - anon
-            - service_role
-
   - name: rest-v1
     url: http://rest:3000/
     routes:
@@ -36,22 +18,6 @@ services:
         config:
           allow:
             - anon
-            - service_role
-
-  - name: pg-meta
-    url: http://meta:8080/
-    routes:
-      - name: pg-meta-all
-        strip_path: true
-        paths:
-          - /pg/
-    plugins:
-      - name: key-auth
-        config:
-          hide_credentials: true
-      - name: acl
-        config:
-          allow:
             - service_role
 
 consumers:
