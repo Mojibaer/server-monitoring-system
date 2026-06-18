@@ -35,6 +35,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXP: ${JWT_EXPIRY:-3600}
+      # Consumed by the grafana-role.sql init script to set grafana_ro's password.
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana_password}
     command:
       [
         "postgres",
@@ -175,8 +177,8 @@ services:
       - "${GRAFANA_PORT:-3000}:3000"
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
-      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana_password}
     volumes:
       - ../grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana_data:/var/lib/grafana

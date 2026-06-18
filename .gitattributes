@@ -1,1 +1,15 @@
-*.sh text eol=lf
+# Force LF line endings for files that run inside Linux containers.
+# CRLF (Windows default) breaks shell scripts and psql \set/echo substitution,
+# e.g. a trailing \r would end up inside the grafana_ro password or JWT secret.
+*.sh   text eol=lf
+*.sql  text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# The Python agent and its entrypoint run in a Linux container too.
+*.py   text eol=lf
+
+# Dockerfiles and env templates.
+Dockerfile      text eol=lf
+*.dockerignore  text eol=lf
+.env.example    text eol=lf
