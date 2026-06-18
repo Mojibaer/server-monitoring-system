@@ -16,6 +16,8 @@ services:
       - ./volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:Z
       # Monitoring schema — runs once on a fresh data volume, after roles/jwt.
       - ./volumes/db/schema.sql:/docker-entrypoint-initdb.d/zzz-schema.sql:Z
+      # Grafana read-only role — runs after the monitoring schema exists.
+      - ./volumes/db/grafana-role.sql:/docker-entrypoint-initdb.d/zzzz-grafana-role.sql:Z
       - db_data:/var/lib/postgresql/data
       - db_config:/etc/postgresql-custom
     healthcheck:
