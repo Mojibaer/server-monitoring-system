@@ -3,6 +3,7 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import { storeAgentMetrics } from "./monitoring";
 import { broadcastToFrontends } from "./sse";
+import { tracer } from "./tracing";
 
 interface AgentMetricsRequest {
   hostname?: string;
@@ -78,9 +79,15 @@ async function submitMetrics(
       diskUsage: Number(call.request.diskUsage)
     });
 
-    broadcastToFrontends({
-      type: "metrics_update",
-      payload: storedMetric
+    await tracer.startActiveSpan("broadcastToFrontends", async (span) => {
+      try {
+        broadcastToFrontends({
+          type: "metrics_update",
+          payload: storedMetric
+        });
+      } finally {
+        span.end();
+      }
     });
 
     console.log(`[AGENT:gRPC] Metrics received from ${storedMetric.hostname} - status: ${storedMetric.status}`);
