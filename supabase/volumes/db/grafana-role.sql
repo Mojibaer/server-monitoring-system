@@ -17,6 +17,5 @@ $$;
 GRANT USAGE ON SCHEMA public TO grafana_ro;
 
 -- Allow Grafana to read the server list and monitoring metrics.
--- These tables are owned by supabase_admin in the Supabase container.
 GRANT SELECT ON TABLE public.servers TO grafana_ro;
 GRANT SELECT ON TABLE public.metrics TO grafana_ro;

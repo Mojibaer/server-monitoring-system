@@ -158,6 +158,27 @@ services:
       AGENT_HOSTNAME: edge-server-03
     mem_limit: 256m
     cpus: 0.25
+  
+  # ─────────────────────────────────────────────
+  # Grafana — dashboards and historical metric views
+  # ─────────────────────────────────────────────
+  grafana:
+    container_name: monitoring-grafana
+    image: grafana/grafana:12.3.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD}
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+
 
   # ─────────────────────────────────────────────
   # Supabase Studio — optional web UI for inspecting the DB.
@@ -183,3 +204,4 @@ services:
 volumes:
   db_data:
   db_config:
+  grafana_data:

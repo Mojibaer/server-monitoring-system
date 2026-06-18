@@ -1,0 +1,22 @@
+# PostgreSQL datasource used by the Grafana dashboard.
+# Grafana connects with a read-only database role.
+
+apiVersion: 1
+
+datasources:
+  - name: Server Monitoring PostgreSQL
+    uid: server-monitoring-postgres
+    type: postgres
+    access: proxy
+    url: db:5432
+    database: postgres
+    user: grafana_ro
+    isDefault: true
+    editable: false
+
+    jsonData:
+      database: postgres
+      sslmode: disable
+
+    secureJsonData:
+      password: ${GRAFANA_DB_PASSWORD} 

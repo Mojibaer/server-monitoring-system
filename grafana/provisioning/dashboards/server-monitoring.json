@@ -1,0 +1,200 @@
+{
+  "uid": "server-monitoring",
+  "title": "Server Monitoring",
+  "tags": ["monitoring", "grafana", "postgres"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "server",
+        "type": "query",
+        "label": "Server",
+        "datasource": {
+          "type": "postgres",
+          "uid": "server-monitoring-postgres"
+        },
+        "query": "SELECT hostname FROM public.servers ORDER BY hostname;",
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "CPU Usage",
+      "type": "timeseries",
+      "datasource": {
+        "type": "postgres",
+        "uid": "server-monitoring-postgres"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "server-monitoring-postgres"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT m.created_at AS \"time\", m.cpu_usage AS \"CPU %\" FROM public.metrics m JOIN public.servers s ON s.id = m.server_id WHERE $__timeFilter(m.created_at) AND s.hostname = '$server' ORDER BY m.created_at;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "RAM Usage",
+      "type": "timeseries",
+      "datasource": {
+        "type": "postgres",
+        "uid": "server-monitoring-postgres"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "server-monitoring-postgres"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT m.created_at AS \"time\", m.ram_usage AS \"RAM %\" FROM public.metrics m JOIN public.servers s ON s.id = m.server_id WHERE $__timeFilter(m.created_at) AND s.hostname = '$server' ORDER BY m.created_at;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Disk Usage",
+      "type": "timeseries",
+      "datasource": {
+        "type": "postgres",
+        "uid": "server-monitoring-postgres"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "server-monitoring-postgres"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT m.created_at AS \"time\", m.disk_usage AS \"Disk %\" FROM public.metrics m JOIN public.servers s ON s.id = m.server_id WHERE $__timeFilter(m.created_at) AND s.hostname = '$server' ORDER BY m.created_at;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Current Server Status",
+      "type": "table",
+      "datasource": {
+        "type": "postgres",
+        "uid": "server-monitoring-postgres"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "server-monitoring-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT s.hostname, latest.cpu_usage, latest.ram_usage, latest.disk_usage, latest.created_at AS last_seen, CASE WHEN latest.created_at < NOW() - INTERVAL '1 hour' THEN 'UNKNOWN' WHEN latest.cpu_usage >= 90 OR latest.ram_usage >= 90 OR latest.disk_usage >= 95 THEN 'CRITICAL' WHEN latest.cpu_usage >= 70 OR latest.ram_usage >= 75 OR latest.disk_usage >= 80 THEN 'WARNING' ELSE 'OK' END AS status FROM public.servers s JOIN LATERAL (SELECT cpu_usage, ram_usage, disk_usage, created_at FROM public.metrics WHERE server_id = s.id ORDER BY created_at DESC LIMIT 1) latest ON TRUE ORDER BY s.hostname;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
+    }
+  ]
+}
