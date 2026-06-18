@@ -1,0 +1,14 @@
+# Dashboard provider used by Grafana provisioning.
+# It tells Grafana where the dashboard JSON files are stored.
+
+apiVersion: 1
+
+providers:
+  - name: Server Monitoring Dashboards
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: false
+
+    options:
+      path: /etc/grafana/provisioning/dashboards

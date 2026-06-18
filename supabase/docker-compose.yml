@@ -16,6 +16,8 @@ services:
       - ./volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:Z
       # Monitoring schema — runs once on a fresh data volume, after roles/jwt.
       - ./volumes/db/schema.sql:/docker-entrypoint-initdb.d/zzz-schema.sql:Z
+      # Grafana read-only role — runs after the monitoring schema exists.
+      - ./volumes/db/grafana-role.sql:/docker-entrypoint-initdb.d/zzzz-grafana-role.sql:Z
       - db_data:/var/lib/postgresql/data
       - db_config:/etc/postgresql-custom
     healthcheck:
@@ -33,6 +35,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXP: ${JWT_EXPIRY:-3600}
+      # Consumed by the grafana-role.sql init script to set grafana_ro's password.
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana_password}
     command:
       [
         "postgres",
@@ -158,6 +162,27 @@ services:
       AGENT_HOSTNAME: edge-server-03
     mem_limit: 256m
     cpus: 0.25
+  
+  # ─────────────────────────────────────────────
+  # Grafana — dashboards and historical metric views
+  # ─────────────────────────────────────────────
+  grafana:
+    container_name: monitoring-grafana
+    image: grafana/grafana:12.3.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana_password}
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+
 
   # ─────────────────────────────────────────────
   # Supabase Studio — optional web UI for inspecting the DB.
@@ -183,3 +208,4 @@ services:
 volumes:
   db_data:
   db_config:
+  grafana_data:
