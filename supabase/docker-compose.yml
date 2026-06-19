@@ -199,6 +199,11 @@ services:
     volumes:
       - ../grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana_data:/var/lib/grafana
+
+  # ─────────────────────────────────────────────
+  # Zipkin — distributed tracing backend + UI (OpenTelemetry → Zipkin)
+  # Receives spans from backend & agents, browse traces at localhost:9411.
+  # ─────────────────────────────────────────────
   zipkin:
     container_name: zipkin
     image: openzipkin/zipkin
