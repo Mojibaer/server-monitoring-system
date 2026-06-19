@@ -9,11 +9,37 @@ import monitoring_pb2
 import monitoring_pb2_grpc
 from cgroup_metrics import collect_resource_usage
 
+from opentelemetry import trace
+from opentelemetry.exporter.zipkin.json import ZipkinExporter
+from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
 BACKEND_URL = os.environ.get("BACKEND_URL", "localhost:50051")
 AGENT_HOSTNAME = os.environ.get("AGENT_HOSTNAME") or socket.gethostname()
 INTERVAL_SECONDS = 60
 RETRY_DELAY = 5
 
+OTEL_EXPORTER_ZIPKIN_ENDPOINT = os.environ.get(
+    "OTEL_EXPORTER_ZIPKIN_ENDPOINT",
+    "http://localhost:9411/api/v2/spans",
+)
+OTEL_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", AGENT_HOSTNAME)
+
+
+def setup_tracing():
+    provider = TracerProvider(
+        resource=Resource.create({"service.name": OTEL_SERVICE_NAME})
+    )
+    exporter = ZipkinExporter(endpoint=OTEL_EXPORTER_ZIPKIN_ENDPOINT)
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+    GrpcAioInstrumentorClient().instrument()
+    return trace.get_tracer("server-monitoring-agent")
+
+
+tracer = setup_tracing()
 
 def get_ip_address():
     try:
@@ -62,7 +88,11 @@ async def send_loop(stub):
     """Send metrics on a fixed interval for as long as the connection holds."""
     while True:
         data = collect_metrics()
-        response = await stub.SubmitMetrics(data, timeout=10)
+
+        with tracer.start_as_current_span("SubmitMetrics") as span:
+            span.set_attribute("agent.hostname", data.hostname)
+            response = await stub.SubmitMetrics(data, timeout=10)
+
         log_metrics(data, response)
         await asyncio.sleep(INTERVAL_SECONDS)
 
@@ -89,4 +119,7 @@ async def run_agent():
 
 
 if __name__ == "__main__":
-    asyncio.run(run_agent())
+    try:
+        asyncio.run(run_agent())
+    finally:
+        trace.get_tracer_provider().shutdown()

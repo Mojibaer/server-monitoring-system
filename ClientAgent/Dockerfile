@@ -3,7 +3,13 @@ FROM python:3.13-slim AS build
 
 # grpcio + protobuf ship prebuilt manylinux (glibc) wheels — no compiler on slim.
 # protobuf is required at runtime by the generated monitoring_pb2 modules.
-RUN pip install --no-cache-dir --prefix=/install "grpcio>=1.81.0" "protobuf>=5.0.0"
+RUN pip install --no-cache-dir --prefix=/install \
+    "grpcio>=1.81.0" \
+    "protobuf>=5.0.0" \
+    "opentelemetry-api" \
+    "opentelemetry-sdk" \
+    "opentelemetry-exporter-zipkin-json" \
+    "opentelemetry-instrumentation-grpc"
 
 # ── Runtime stage ────────────────────────────────────────────────────
 FROM python:3.13-slim AS runtime

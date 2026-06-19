@@ -1,7 +1,10 @@
+import "./tracing";
+
 import { initDatabase, seedDatabase } from "./db";
 import { startSseServer, shutdownSseServer } from "./sse";
 import { startGrpcServer, shutdownGrpcServer } from "./grpc";
 import { waitForSupabase } from "./supabase";
+import { shutdownTracing } from "./tracing";
 
 async function main() {
     await waitForSupabase();
@@ -22,6 +25,7 @@ async function shutdown(signal: string) {
     await shutdownGrpcServer();
     await shutdownSseServer();
     console.log("Server stopped.");
+    await shutdownTracing();
     process.exit(0);
 }
 

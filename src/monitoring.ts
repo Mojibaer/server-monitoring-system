@@ -1,6 +1,7 @@
 import { getMetricsWithServers, insertMetric, upsertServer } from "./db";
 import { calculateStatus } from "./metrics";
 import { AgentMetricsPayload, ServerStatus } from "./type";
+import { tracer } from "./tracing";
 
 export interface StoredMetric extends Omit<AgentMetricsPayload, "ipAddress"> {
   ipAddress: string | null;
@@ -80,27 +81,49 @@ export async function getInitialMetrics() {
 }
 
 export async function storeAgentMetrics(metrics: AgentMetricsPayload): Promise<StoredMetric> {
-  const validationError = validateAgentMetrics(metrics);
+  return tracer.startActiveSpan("storeAgentMetrics", async (span) => {
+    try {
+      span.setAttribute("agent.hostname", metrics.hostname);
 
-  if (validationError) {
-    throw new Error(validationError);
-  }
+      const validationError = validateAgentMetrics(metrics);
 
-  const { hostname, ipAddress, cpuUsage, ramUsage, diskUsage } = metrics;
-  const now = new Date().toISOString();
+      if (validationError) {
+        throw new Error(validationError);
+      }
 
-  const server = await upsertServer(hostname, ipAddress ?? null, now);
-  await insertMetric(server.id, cpuUsage, ramUsage, diskUsage, now);
+      const { hostname, ipAddress, cpuUsage, ramUsage, diskUsage } = metrics;
+      const now = new Date().toISOString();
 
-  const status = calculateStatus(metrics);
+      const server = await tracer.startActiveSpan("upsertServer", async (childSpan) => {
+        try {
+          return await upsertServer(hostname, ipAddress ?? null, now);
+        } finally {
+          childSpan.end();
+        }
+      });
 
-  return {
-    hostname,
-    ipAddress: ipAddress ?? null,
-    cpuUsage,
-    ramUsage,
-    diskUsage,
-    status,
-    timestamp: now
-  };
+      await tracer.startActiveSpan("insertMetric", async (childSpan) => {
+        try {
+          await insertMetric(server.id, cpuUsage, ramUsage, diskUsage, now);
+        } finally {
+          childSpan.end();
+        }
+      });
+
+      const status = calculateStatus(metrics);
+      span.setAttribute("metric.status", status);
+
+      return {
+        hostname,
+        ipAddress: ipAddress ?? null,
+        cpuUsage,
+        ramUsage,
+        diskUsage,
+        status,
+        timestamp: now
+      };
+    } finally {
+      span.end();
+    }
+  });
 }

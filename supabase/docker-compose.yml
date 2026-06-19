@@ -1,7 +1,6 @@
 name: server-monitoring
 
 services:
-
   # ─────────────────────────────────────────────
   # PostgreSQL — Supabase-flavoured Postgres 15
   # ─────────────────────────────────────────────
@@ -41,7 +40,7 @@ services:
       [
         "postgres",
         "-c", "config_file=/etc/postgresql/postgresql.conf",
-        "-c", "log_min_messages=fatal"
+        "-c", "log_min_messages=fatal",
       ]
 
   # ─────────────────────────────────────────────
@@ -110,13 +109,16 @@ services:
     depends_on:
       kong:
         condition: service_healthy
+      zipkin:
+        condition: service_healthy
     ports:
-      - "8081:8081"   # SSE / dashboard
+      - "8081:8081" # SSE / dashboard
     environment:
       # Backend talks to Supabase through Kong inside the compose network.
       SUPABASE_PUBLIC_URL: http://kong:8000
       SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
-
+      OTEL_EXPORTER_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
+      OTEL_SERVICE_NAME: monitoring-backend
   # ─────────────────────────────────────────────
   # Client agents — same image, individual identity & limits.
   # gRPC → backend:50051 (internal). Each container gets its own IP.
@@ -128,10 +130,15 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      zipkin:
+        condition: service_healthy
     environment:
       BACKEND_URL: backend:50051
       AGENT_HOSTNAME: web-server-01
+      OTEL_EXPORTER_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
+      OTEL_SERVICE_NAME: agent-web-01
     mem_limit: 512m
     cpus: 0.5
 
@@ -142,10 +149,15 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      zipkin:
+        condition: service_healthy
     environment:
       BACKEND_URL: backend:50051
       AGENT_HOSTNAME: db-server-02
+      OTEL_EXPORTER_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
+      OTEL_SERVICE_NAME: agent-db-02
     mem_limit: 1g
     cpus: 1.0
 
@@ -156,13 +168,18 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      zipkin:
+        condition: service_healthy
     environment:
       BACKEND_URL: backend:50051
       AGENT_HOSTNAME: edge-server-03
+      OTEL_EXPORTER_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
+      OTEL_SERVICE_NAME: agent-edge-03
     mem_limit: 256m
     cpus: 0.25
-  
+
   # ─────────────────────────────────────────────
   # Grafana — dashboards and historical metric views
   # ─────────────────────────────────────────────
@@ -183,6 +200,16 @@ services:
       - ../grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana_data:/var/lib/grafana
 
+  # ─────────────────────────────────────────────
+  # Zipkin — distributed tracing backend + UI (OpenTelemetry → Zipkin)
+  # Receives spans from backend & agents, browse traces at localhost:9411.
+  # ─────────────────────────────────────────────
+  zipkin:
+    container_name: zipkin
+    image: openzipkin/zipkin
+    restart: unless-stopped
+    ports:
+      - "9411:9411"
 
   # ─────────────────────────────────────────────
   # Supabase Studio — optional web UI for inspecting the DB.
