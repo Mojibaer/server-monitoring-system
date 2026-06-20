@@ -24,13 +24,14 @@ The project is a lightweight real-time monitoring system. A Python agent runs on
   - [5.2 Logic and Charts: `frontend/script.js`](#52-logic-and-charts-frontendscriptjs)
   - [5.3 Styling: `frontend/style.css`](#53-styling-frontendstylecss)
 - [6. Python Client Agent](#6-python-client-agent)
-- [7. How to Run the Project](#7-how-to-run-the-project)
-- [8. Running from Another Machine](#8-running-from-another-machine)
-- [9. Tests](#9-tests)
-- [10. Dependencies](#10-dependencies)
-- [11. Troubleshooting](#11-troubleshooting)
-- [12. Known Limitations and Possible Improvements](#12-known-limitations-and-possible-improvements)
-- [13. Team Responsibilities](#13-team-responsibilities)
+- [7. Metrics Dashboards: Grafana](#7-metrics-dashboards-grafana)
+- [8. Distributed Tracing: Zipkin](#8-distributed-tracing-zipkin)
+- [9. How to Run the Project](#9-how-to-run-the-project)
+- [10. Adding More Agents](#10-adding-more-agents)
+- [11. Tests](#11-tests)
+- [12. Dependencies](#12-dependencies)
+- [13. Known Limitations and Possible Improvements](#13-known-limitations-and-possible-improvements)
+- [14. Team Responsibilities](#14-team-responsibilities)
 
 ---
 
@@ -86,6 +87,11 @@ The current implementation focuses on gRPC communication from the agent to the b
 All components except the browser dashboard run as Docker Compose services.
 Agents are separate containers built from one image, individualised through
 environment variables, each with its own IP and CPU/memory limits.
+
+Two observability services run alongside the core stack: **Grafana** (`:3000`,
+historical metric dashboards read directly from PostgreSQL — see section 7) and
+**Zipkin** (`:9411`, distributed traces of a single request across agent and
+backend — see section 8).
 
 The system has three main parts:
 
@@ -666,7 +672,106 @@ This makes the agent more robust during development.
 
 ---
 
-## 7. How to Run the Project
+## 7. Metrics Dashboards: Grafana
+
+Grafana runs as a Compose service and provides historical dashboards on top of
+the same monitoring data. It answers questions like *"how loaded was server X
+over the last hour?"* — the aggregate, over-time view that the live SSE
+dashboard does not keep.
+
+| Property        | Value                                                  |
+| --------------- | ------------------------------------------------------ |
+| URL             | `http://localhost:3000`                                |
+| Default login   | `admin` / `admin` (override via `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD`) |
+| Port variable   | `GRAFANA_PORT` (defaults to `3000`)                    |
+| Data source     | PostgreSQL — Grafana reads the database **directly**   |
+
+### How it works
+
+Grafana does **not** go through the backend. It connects straight to the
+Supabase PostgreSQL database with a dedicated **read-only** role and queries the
+`servers` and `metrics` tables. Both the data source and the dashboard are
+provisioned automatically from files, so nothing has to be clicked together by
+hand:
+
+```text
+grafana/provisioning/
+|-- datasources/postgres.yml        read-only PostgreSQL data source
+|-- dashboards/dashboards.yml       tells Grafana where to load dashboards
+`-- dashboards/server-monitoring.json   the dashboard definition
+```
+
+### The "Server Monitoring" dashboard
+
+It contains panels for:
+
+- **CPU Usage** over time
+- **RAM Usage** over time
+- **Disk Usage** over time
+- **Current Server Status** (`OK` / `WARNING` / `CRITICAL`)
+
+Because Grafana reads the database, dashboards show data for every server that
+has ever reported — including history kept in the `metrics` table, beyond the
+last 20 points the live dashboard shows.
+
+> Grafana is read-only by design: it only queries the database and never writes
+> to it, so it cannot affect the monitoring data.
+
+---
+
+## 8. Distributed Tracing: Zipkin
+
+Zipkin runs as a Compose service and visualises **distributed traces**. Where
+Grafana shows aggregate metrics over time, Zipkin shows a single request's path
+across services — *"for this one metric submission, which step was slow: the
+gRPC hop, the `servers` upsert, or the `metrics` insert?"*
+
+| Property        | Value                                                  |
+| --------------- | ------------------------------------------------------ |
+| URL             | `http://localhost:9411`                                |
+| Auth            | None (self-hosted, no login) — keep the port local     |
+| Storage         | In-memory (traces are lost on Zipkin restart)          |
+| Instrumentation | OpenTelemetry (OTel) SDK in both agent and backend     |
+
+### How it works
+
+The Python agent and the Node backend are both instrumented with the
+OpenTelemetry SDK and export spans to Zipkin at
+`http://zipkin:9411/api/v2/spans` (configured via the
+`OTEL_EXPORTER_ZIPKIN_ENDPOINT` and `OTEL_SERVICE_NAME` environment variables in
+the Compose file). Trace context is propagated from the agent to the backend
+across the gRPC call, so one metric submission appears as a single connected
+trace.
+
+Spans are created for the meaningful hops along the request path:
+
+```text
+agent: SubmitMetrics            (client span, service "agent-web-01" etc.)
+  └─ backend: storeAgentMetrics (service "monitoring-backend")
+       ├─ upsertServer          (REST POST /servers)
+       ├─ insertMetric          (REST POST /metrics)
+       └─ broadcastToFrontends  (SSE broadcast)
+```
+
+### What you see in the UI
+
+- **Find a trace** — search recent traces and open one as a waterfall, where the
+  width of each bar shows how long that step took.
+- **Dependencies** — a service-dependency graph (agents → backend) derived from
+  the traces. It only shows services that have actually sent spans, so it fills
+  in once traffic flows.
+
+Traces start appearing after the agents begin reporting (every 60 s). Since
+storage is in-memory, restarting the Zipkin container clears all traces — which
+is acceptable for this local/demo setup.
+
+> The OpenTelemetry layer decouples instrumentation from the backend, so Zipkin
+> could later be swapped for another tracing backend (e.g. Grafana Tempo) as a
+> configuration change rather than a code rewrite. See `docs/adr/0003-zipkin-tracing.md`.
+
+---
+
+## 9. How to Run the Project
 
 The entire stack (database, backend and agents) runs through Docker Compose.
 Only the browser dashboard runs outside Docker.
@@ -762,7 +867,7 @@ docker compose --env-file supabase/.env -f supabase/docker-compose.yml down -v
 
 ---
 
-## 8. Adding More Agents
+## 10. Adding More Agents
 
 Each agent is a service in `supabase/docker-compose.yml`, all built from
 `ClientAgent/`. To add an agent, copy an existing `agent-*` block and give it:
@@ -782,7 +887,7 @@ limits.
 
 ---
 
-## 9. Tests
+## 11. Tests
 
 Tests are located in:
 
@@ -812,7 +917,7 @@ Important note: the tests use the same Supabase/PostgreSQL database. Test server
 
 ---
 
-## 10. Dependencies
+## 12. Dependencies
 
 ### Backend dependencies
 
@@ -821,6 +926,8 @@ Important note: the tests use the same Supabase/PostgreSQL database. Test server
 | `@grpc/grpc-js`         | Runtime     | gRPC server implementation for Node.js                   |
 | `@grpc/proto-loader`    | Runtime     | Loads the `.proto` file at runtime                       |
 | `dotenv`                | Runtime     | Loads environment variables from `supabase/.env` (Supabase URL and service role key) |
+| `@opentelemetry/sdk-node` + `@opentelemetry/exporter-zipkin` | Runtime | OpenTelemetry SDK and Zipkin exporter for distributed tracing |
+| `@opentelemetry/instrumentation-grpc` / `-http` | Runtime | Auto-instrument gRPC and HTTP calls into spans |
 | `typescript`            | Development | TypeScript compiler                                      |
 | `tsx`                   | Development | Run TypeScript directly during development               |
 | `@types/node`           | Development | Node.js type definitions                                 |
@@ -852,6 +959,8 @@ ClientAgent/pyproject.toml
 | ------------ | ----------------------------- |
 | `grpcio`     | gRPC client connection        |
 | `grpcio-tools` | gRPC/protobuf tooling (used to generate the `_pb2` stubs) |
+| `opentelemetry-sdk` + `opentelemetry-exporter-zipkin-json` | OpenTelemetry tracing and Zipkin span export |
+| `opentelemetry-instrumentation-grpc` | Auto-instrument the agent's gRPC call and propagate trace context |
 
 CPU, RAM and disk usage are read from the container's cgroup filesystem
 (`cgroup_metrics.py`), so no `psutil` dependency is needed. `protobuf` is pulled
@@ -859,7 +968,7 @@ in transitively by `grpcio` and required at runtime by the generated stubs.
 
 ---
 
-## 11. Known Limitations and Possible Improvements
+## 13. Known Limitations and Possible Improvements
 
 ### Current limitations
 
@@ -886,7 +995,7 @@ in transitively by `grpcio` and required at runtime by the generated stubs.
 
 ---
 
-## 12. Team Responsibilities
+## 14. Team Responsibilities
 
 | Team member        | Responsibility                                                       |
 | ------------------ | -------------------------------------------------------------------- |

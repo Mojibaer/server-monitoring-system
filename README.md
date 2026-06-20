@@ -25,14 +25,20 @@ Everything (backend, agents, database) runs in Docker, started with a single
 ```text
 agent-web-01  ┐
 agent-db-02   ┼─ gRPC ─→  Node backend ─ REST ─→  Supabase (db + rest + kong)
-agent-edge-03 ┘             :50051                      :8000
-                              │
+agent-edge-03 ┘             :50051                      :8000  ←── reads ── Grafana :3000
+                              │                                          (metric dashboards)
                           SSE :8081 ─→  Browser dashboard (frontend/)
+
+agents + backend ── traces (OpenTelemetry) ──→  Zipkin :9411  (distributed tracing UI)
 ```
 
 Each agent runs as a separate container with its own IP and its own CPU/memory
 limits, so it appears in the dashboard as a distinct server. All agents are built
 from one image and individualised through environment variables.
+
+Two observability UIs run alongside the stack: **Grafana** (`:3000`) for
+historical metric dashboards read straight from the database, and **Zipkin**
+(`:9411`) for per-request distributed traces across the agents and backend.
 
 ## Technologies
 
@@ -40,6 +46,8 @@ from one image and individualised through environment variables.
 - **Database:** Supabase/PostgreSQL (PostgREST + Kong) in Docker
 - **Agent:** Python, grpcio, cgroup-based metrics
 - **Frontend:** HTML, CSS, JavaScript
+- **Metrics dashboards:** Grafana (reads PostgreSQL directly)
+- **Tracing:** OpenTelemetry → Zipkin (distributed traces)
 - **Orchestration:** Docker Compose
 
 ## Project Structure
@@ -113,6 +121,19 @@ frontend/index.html
 ```
 
 You can also use the VS Code Live Server extension.
+
+### 5. Open the observability UIs (optional)
+
+Two extra UIs are published by the stack and open directly in the browser — no
+login is needed for either (they are exposed for local use only):
+
+| UI          | URL                     | What you see there                                                                                 |
+| ----------- | ----------------------- | -------------------------------------------------------------------------------------------------- |
+| **Grafana** | `http://localhost:3000` | The **Server Monitoring** dashboard: historical CPU, RAM and disk usage plus current server status, read straight from PostgreSQL. Default login `admin` / `admin` unless overridden via env. |
+| **Zipkin**  | `http://localhost:9411` | **Distributed traces**: a per-request waterfall across agent → backend → database calls (under *Find a trace*), and a service-dependency graph (under *Dependencies*). Traces appear once the agents start reporting (every 60 s) and are kept in memory only. |
+
+> Grafana answers *"how loaded was server X over time"*; Zipkin answers *"for
+> this one request, which step was slow"*. They are complementary.
 
 ### Stop the stack
 
